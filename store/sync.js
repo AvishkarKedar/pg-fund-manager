@@ -47,7 +47,7 @@ const MAX_TIMER_RETRIES = BACKOFFS.length; // after this, resume on online/focus
 const TABLES = ["properties", "floors", "rooms", "beds", "tenants", "rent_ledger"];
 
 /* Missing table (migrations pending): hold, release via health probe. */
-const PARK_CODES = ["42P01", "PGRST205", "PGRST202"];
+const PARK_CODES = ["42P01", "PGRST205", "PGRST202", "PGRST204"];
 const PARKED_RE = /relation .* does not exist|schema cache|could not find the table/i;
 
 /* 42703 "column X does not exist" — adaptive stripping target: the payload
@@ -59,7 +59,7 @@ const MISSING_COL_RE = /column (?:"?\w+"?\.)?"?([a-z_][a-z0-9_]*)"? does not exi
    `record has no field "updated_at"` from the touch trigger, which the
    regex-based stripper can't match. preparePayloadForTable drops it up front
    for the known-affected tables; the adaptive stripper covers the rest. */
-const NO_UPDATED_AT_TABLES = new Set(["properties", "rooms", "beds"]);
+const NO_UPDATED_AT_TABLES = new Set(["rooms", "beds"]);
 function preparePayloadForTable(table, record) {
   if (!NO_UPDATED_AT_TABLES.has(table)) { return record; }
   const row = { ...record };
