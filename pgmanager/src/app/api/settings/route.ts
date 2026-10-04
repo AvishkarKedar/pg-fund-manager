@@ -1,47 +1,58 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { requireAuth, audit } from "@/lib/auth";
+import { readJson, ok, handle } from "@/lib/api";
 
-// GET /api/settings
+export const dynamic = "force-dynamic";
+
+const KEYS = ["property", "preferences", "rateCard", "rules"] as const;
+
 export async function GET() {
-  try {
-    await requireAuth();
-    const settings = await prisma.setting.findMany();
-    const map: Record<string, string> = {};
-    settings.forEach((s) => { map[s.key] = s.value; });
-    return NextResponse.json(map);
-  } catch (error) {
-    return NextResponse.json({ error: "Failed" }, { status: 500 });
-  }
+  return handle(async () => {
+    const { response } = await requireAuth();
+    if (response) return response;
+
+    const rows = await db.setting.findMany({ where: { key: { in: [...KEYS] } } });
+    const settings: Record<string, unknown> = {};
+    for (const row of rows) {
+      try {
+        settings[row.key] = JSON.parse(row.value);
+      } catch {
+        settings[row.key] = null;
+      }
+    }
+    return ok({ settings });
+  });
 }
 
-// PUT /api/settings
-export async function PUT(request: NextRequest) {
-  try {
-    const user = await requireAuth();
-    const body = await request.json();
+export async function PATCH(req: Request) {
+  return handle(async () => {
+    const { user, response } = await requireAuth();
+    if (response) return response;
 
-    const updates = Object.entries(body).map(([key, value]) =>
-      prisma.setting.upsert({
-        where: { key },
-        create: { key, value: String(value) },
-        update: { value: String(value) },
-      })
-    );
+    const body = await readJson<Record<string, unknown>>(req);
+    // strict whitelist — the legacy app let imports wipe these settings
+    const applied: string[] = [];
+    for (const key of KEYS) {
+      if (body[key] !== undefined) {
+        await db.setting.upsert({
+          where: { key },
+          create: { key, value: JSON.stringify(body[key]) },
+          update: { value: JSON.stringify(body[key]) },
+        });
+        applied.push(key);
+      }
+    }
+    await audit(user.id, "UPDATED", "Settings", undefined, { applied });
 
-    await Promise.all(updates);
-
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "UPDATE",
-        entity: "setting",
-        newValue: JSON.stringify(body),
-      },
-    });
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to save settings" }, { status: 500 });
-  }
+    const rows = await db.setting.findMany({ where: { key: { in: [...KEYS] } } });
+    const settings: Record<string, unknown> = {};
+    for (const row of rows) {
+      try {
+        settings[row.key] = JSON.parse(row.value);
+      } catch {
+        settings[row.key] = null;
+      }
+    }
+    return ok({ settings, applied });
+  });
 }

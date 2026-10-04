@@ -1,96 +1,95 @@
-import { prisma } from "./prisma";
-import bcrypt from "bcryptjs";
+import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
 
-const SESSION_COOKIE = "pg_session";
-const SESSION_MAX_AGE = 12 * 60 * 60; // 12 hours in seconds
+export const SESSION_COOKIE = "pg_session";
+const SESSION_DAYS = 7;
 
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
 }
 
-export async function verifyPassword(
-  password: string,
-  hash: string
-): Promise<boolean> {
-  return bcrypt.compare(password, hash);
+export function verifyPassword(password: string, stored: string): boolean {
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  const candidate = scryptSync(password, salt, 64);
+  const expected = Buffer.from(hash, "hex");
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
-export async function createSession(userId: string): Promise<string> {
-  const token = generateToken();
-  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000);
-
-  await prisma.session.create({
-    data: { userId, token, expiresAt },
-  });
-
-  const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, token, {
+export async function createSession(userId: string) {
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  await db.session.create({ data: { token, userId, expiresAt } });
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: SESSION_MAX_AGE,
     path: "/",
+    expires: expiresAt,
   });
-
   return token;
 }
 
-export async function getSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+export async function destroySession() {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (token) {
+    await db.session.deleteMany({ where: { token } });
+  }
+  jar.delete(SESSION_COOKIE);
+}
 
-  const session = await prisma.session.findUnique({
-    where: { token },
-    include: { user: true },
-  });
-
-  if (!session || session.expiresAt < new Date()) {
-    if (session) {
-      await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
-    }
+/** Returns the logged-in user or null. NEVER throws/redirects — callers decide. */
+export async function getSessionUser() {
+  try {
+    const jar = await cookies();
+    const token = jar.get(SESSION_COOKIE)?.value;
+    if (!token) return null;
+    const session = await db.session.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+    if (!session || session.expiresAt < new Date()) return null;
+    return session.user;
+  } catch {
     return null;
   }
-
-  return session;
 }
 
-export async function getCurrentUser() {
-  const session = await getSession();
-  return session?.user || null;
-}
-
-export async function requireAuth() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
-  return user;
-}
-
-export async function requireRole(...roles: string[]) {
-  const user = await requireAuth();
-  if (!roles.includes(user.role)) {
-    redirect("/dashboard");
+/** Route-handler guard: returns user or a 401 Response. */
+export async function requireAuth(): Promise<
+  { user: NonNullable<Awaited<ReturnType<typeof getSessionUser>>>; response?: never } | { user?: never; response: Response }
+> {
+  const user = await getSessionUser();
+  if (!user) {
+    return {
+      response: Response.json({ error: "Not authenticated" }, { status: 401 }),
+    };
   }
-  return user;
+  return { user };
 }
 
-export async function destroySession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (token) {
-    await prisma.session.deleteMany({ where: { token } }).catch(() => {});
+export async function audit(
+  userId: string | null,
+  action: string,
+  entity: string,
+  entityId?: string,
+  details?: unknown
+) {
+  try {
+    await db.auditLog.create({
+      data: {
+        userId: userId ?? null,
+        action,
+        entity,
+        entityId: entityId ?? null,
+        details: details === undefined ? null : JSON.stringify(details),
+      },
+    });
+  } catch {
+    // auditing must never break the main operation
   }
-  cookieStore.delete(SESSION_COOKIE);
-}
-
-function generateToken(): string {
-  const bytes = new Uint8Array(32);
-  if (typeof globalThis.crypto !== "undefined") {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }

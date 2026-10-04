@@ -1,9 +1,19 @@
 # PG Manager
 
 Owner dashboard for a paying-guest property: beds, tenants and rent collection.
-No build step, no framework — plain HTML, CSS and JavaScript, hosted on Cloudflare Pages.
 
-Live: https://pg.swayamkate.com/
+- **Live (legacy app):** https://pg.swayamkate.com/ — plain HTML/CSS/JS on Cloudflare Pages
+- **`pgmanager/` — the completed Next.js rewrite.** Professional UI, proper
+  database (Prisma, Decimal money, append-only payments), Excel import with
+  auto-fix + auto-sort, reports, and a data doctor. See
+  [`pgmanager/README.md`](pgmanager/README.md) for a 2-minute quick start.
+- **`supabase/migrations/013_consolidated_repair.sql`** — one-shot repair for
+  the schema drift behind the 42703 / PGRST204 errors on the live database
+  (missing `updated_at` on floors/rooms/beds, missing `rooms.number` /
+  `beds.slot`, non-partial uniques blocking re-creation after soft deletes,
+  the never-executed 009 RLS migration, and 010's uuid/text RPC mismatches).
+  Idempotent — safe to run on any DB that went through 001–012, fully or
+  partially.
 
 ## Files
 

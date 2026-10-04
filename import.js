@@ -533,7 +533,7 @@
       var hasMonthPayment = false;
       if (map.paid !== undefined) {
         var pv = norm(get("paid")).toLowerCase();
-        hasMonthPayment = truthy(get("paid")) || /paid|yes|y|\u2713|\u2714/.test(pv);
+        hasMonthPayment = truthy(get("paid")) || /^(paid|payed|yes|y|ok|done|received|cleared|true|1)$/.test(pv);
       }
       /* Scan all columns for month payment patterns */
       var headerCells = rows[headerIndex] || [];
@@ -544,7 +544,7 @@
           var monthNum = MONTH_MAP[mMatch[1]];
           /* Extract year from header: "april26payment" → 26 → 2026 */
           var yrMatch = hk.match(/(\d{2,4})/);
-          var year = '2026';
+          var year = String(new Date().getFullYear());
           if (yrMatch) {
             var yr = parseInt(yrMatch[1], 10);
             year = yr > 100 ? String(yr) : '20' + String(yr);

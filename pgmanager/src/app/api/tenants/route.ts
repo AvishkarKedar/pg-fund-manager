@@ -1,164 +1,169 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { getCurrentMonth } from "@/lib/utils";
+import { db } from "@/lib/db";
+import { requireAuth, audit } from "@/lib/auth";
+import { readJson, ok, bad, handle } from "@/lib/api";
+import { Decimal } from "decimal.js";
+import { todayYm, ym, todayIST } from "@/lib/dates";
 
-// GET /api/tenants — list all tenants with assignments
-export async function GET(request: NextRequest) {
-  try {
-    await requireAuth();
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get("status");
-    const search = searchParams.get("search");
+export const dynamic = "force-dynamic";
 
-    const where: any = {};
-    if (status && status !== "all") where.status = status;
+export async function GET(req: Request) {
+  return handle(async () => {
+    const { response } = await requireAuth();
+    if (response) return response;
 
-    const tenants = await prisma.tenant.findMany({
-      where,
-      include: {
-        assignments: {
-          where: { isActive: true },
-          include: {
-            bed: { include: { room: true } },
-            rentRecords: { where: { month: getCurrentMonth() } },
-          },
-        },
-        payments: {
-          where: { isReversed: false },
-          orderBy: { date: "desc" },
-          take: 1,
-        },
-        aliases: true,
-      },
+    const url = new URL(req.url);
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const status = url.searchParams.get("status") ?? "";
+    const month = url.searchParams.get("month") || todayYm();
+
+    const tenants = await db.tenant.findMany({
       orderBy: { name: "asc" },
+      include: {
+        tenancies: {
+          where: { isActive: true },
+          include: { bed: { include: { room: true } } },
+        },
+      },
     });
 
-    // Filter by search
-    let filtered = tenants;
-    if (search) {
-      const q = search.toLowerCase();
-      filtered = tenants.filter(
-        (t) =>
-          t.name.toLowerCase().includes(q) ||
-          t.phone?.toLowerCase().includes(q) ||
-          t.email?.toLowerCase().includes(q) ||
-          t.assignments.some(
-            (a) =>
-              a.bed.room.number.toLowerCase().includes(q) ||
-              a.bed.number.toLowerCase().includes(q)
-          )
-      );
-    }
+    const invoices = await db.rentInvoice.findMany({
+      where: { period: month },
+      include: { tenancy: { select: { tenantId: true } } },
+    });
+    const invoiceByTenant = new Map(invoices.map((i) => [i.tenancy.tenantId, i]));
 
-    // Calculate outstanding for each tenant
-    const result = filtered.map((t) => {
-      const assignment = t.assignments[0];
-      const rentRecord = assignment?.rentRecords[0];
-      const monthlyRent = assignment ? Number(assignment.monthlyRent) : 0;
-      const paid = rentRecord ? Number(rentRecord.amountPaid) : 0;
-      const outstanding = monthlyRent - paid;
-
+    let list = tenants.map((t) => {
+      const tenancy = t.tenancies[0] ?? null;
+      const inv = tenancy ? invoiceByTenant.get(t.id) : null;
       return {
         id: t.id,
         name: t.name,
         phone: t.phone,
         email: t.email,
         status: t.status,
-        roomNumber: assignment?.bed.room.number || null,
-        bedNumber: assignment?.bed.number || null,
-        monthlyRent,
-        currentMonthPaid: paid,
-        outstanding,
-        lastPayment: t.payments[0] || null,
-        createdAt: t.createdAt,
+        workplace: t.workplace,
+        room: tenancy?.bed.room.number ?? null,
+        bed: tenancy?.bed.label ?? null,
+        bedId: tenancy?.bedId ?? null,
+        monthlyRent: tenancy ? Number(tenancy.monthlyRent) : null,
+        dueDay: tenancy?.dueDay ?? null,
+        deposit: tenancy ? Number(tenancy.securityDeposit) : null,
+        joined: tenancy?.startDate ?? null,
+        tenancyId: tenancy?.id ?? null,
+        current: inv
+          ? {
+              invoiceId: inv.id,
+              period: inv.period,
+              due: Number(inv.dueAmount),
+              paid: Number(inv.paidAmount),
+              outstanding: Math.max(0, Number(inv.dueAmount) - Number(inv.paidAmount)),
+              status: inv.status,
+            }
+          : null,
       };
     });
 
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("Tenants list error:", error);
-    return NextResponse.json({ error: "Failed to load tenants" }, { status: 500 });
-  }
+    if (q) {
+      list = list.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.phone ?? "").toLowerCase().includes(q) ||
+          (t.room ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (status) list = list.filter((t) => t.status === status);
+
+    return ok({ tenants: list, month });
+  });
 }
 
-// POST /api/tenants — create a tenant and optionally assign to a bed
-export async function POST(request: NextRequest) {
-  try {
-    const user = await requireAuth();
-    const body = await request.json();
+export async function POST(req: Request) {
+  return handle(async () => {
+    const { user, response } = await requireAuth();
+    if (response) return response;
 
-    const { name, phone, email, emergencyContact, idType, idNumber, notes,
-            bedId, monthlyRent, securityDeposit, joiningDate, dueDate, aliases } = body;
+    const body = await readJson<{
+      name?: string; phone?: string; email?: string; idType?: string; idNumber?: string;
+      emergencyContact?: string; workplace?: string; notes?: string;
+      bedId?: string; monthlyRent?: number; securityDeposit?: number; dueDay?: number;
+      startDate?: string; createInvoice?: boolean;
+    }>(req);
 
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Tenant name is required" }, { status: 400 });
+    const name = String(body.name ?? "").trim();
+    if (!name) return bad("Tenant name is required");
+    const phone = body.phone?.trim() || null;
+    if (phone && !/^[+\d][\d\s-]{6,17}$/.test(phone)) return bad("Phone number looks invalid");
+
+    let bed = null;
+    if (body.bedId) {
+      bed = await db.bed.findUnique({
+        where: { id: body.bedId },
+        include: { room: true, tenancies: { where: { isActive: true } } },
+      });
+      if (!bed) return bad("Bed not found", 404);
+      if (bed.tenancies.length > 0) return bad(`Bed ${bed.room.number}-${bed.label} is already occupied`, 409);
     }
 
-    const tenant = await prisma.tenant.create({
+    const rent = bed ? Number(body.monthlyRent ?? bed.room.defaultRent) : Number(body.monthlyRent ?? 0);
+    if (!isFinite(rent) || rent < 0) return bad("Monthly rent must be a positive number");
+    const deposit = Number(body.securityDeposit ?? 0);
+    if (!isFinite(deposit) || deposit < 0) return bad("Deposit must be a positive number");
+    const dueDay = Number(body.dueDay ?? 5);
+    if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 28) return bad("Due day must be 1–28");
+
+    const startDate = body.startDate ? new Date(body.startDate) : todayIST();
+    if (isNaN(startDate.getTime())) return bad("Invalid joining date");
+
+    const tenant = await db.tenant.create({
       data: {
-        name: name.trim(),
-        phone: phone || null,
-        email: email?.toLowerCase().trim() || null,
-        emergencyContact: emergencyContact || null,
-        idType: idType || null,
-        idNumber: idNumber || null,
-        notes: notes || null,
+        name,
+        phone,
+        email: body.email?.trim() || null,
+        idType: body.idType || null,
+        idNumber: body.idNumber?.trim() || null,
+        emergencyContact: body.emergencyContact?.trim() || null,
+        workplace: body.workplace?.trim() || null,
+        notes: body.notes?.trim() || null,
+        status: "ACTIVE",
       },
     });
 
-    // Create aliases
-    if (aliases?.length) {
-      await prisma.tenantAlias.createMany({
-        data: aliases.map((a: string) => ({
-          tenantId: tenant.id,
-          alias: a.trim(),
-          source: "manual",
-        })),
-      });
-    }
-
-    // Assign to bed if provided
-    if (bedId && monthlyRent) {
-      const assignment = await prisma.tenantAssignment.create({
+    if (bed) {
+      const tenancy = await db.tenancy.create({
         data: {
           tenantId: tenant.id,
-          bedId,
-          monthlyRent: parseFloat(monthlyRent),
-          securityDeposit: securityDeposit ? parseFloat(securityDeposit) : null,
-          joiningDate: joiningDate ? new Date(joiningDate) : new Date(),
-          dueDate: dueDate || 5,
+          bedId: bed.id,
+          startDate,
+          monthlyRent: new Decimal(rent),
+          securityDeposit: new Decimal(deposit),
+          dueDay,
+          isActive: true,
         },
       });
-
-      // Create current month rent record
-      const month = getCurrentMonth();
-      await prisma.rentRecord.create({
-        data: {
-          assignmentId: assignment.id,
-          tenantId: tenant.id,
-          bedId,
-          month,
-          rentDue: parseFloat(monthlyRent),
-          status: "DUE",
-        },
+      // invoice for the current month if they joined before month end
+      const period = ym(startDate);
+      const cur = todayYm();
+      if (period <= cur) {
+        await db.rentInvoice.create({
+          data: {
+            tenancyId: tenancy.id,
+            period: cur,
+            dueAmount: new Decimal(rent),
+            paidAmount: new Decimal(0),
+            status: "DUE",
+            dueDate: new Date(),
+          },
+        }).catch(() => null);
+      }
+      await audit(user.id, "CREATED", "Tenant", tenant.id, {
+        name,
+        room: `${bed.room.number}-${bed.label}`,
+        rent,
       });
+    } else {
+      await audit(user.id, "CREATED", "Tenant", tenant.id, { name, unassigned: true });
     }
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "CREATE",
-        entity: "tenant",
-        entityId: tenant.id,
-        newValue: JSON.stringify({ name: tenant.name }),
-      },
-    });
-
-    return NextResponse.json({ ok: true, tenant });
-  } catch (error) {
-    console.error("Tenant create error:", error);
-    return NextResponse.json({ error: "Failed to create tenant" }, { status: 500 });
-  }
+    return ok({ tenant: { id: tenant.id, name } }, { status: 201 });
+  });
 }

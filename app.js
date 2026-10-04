@@ -2125,7 +2125,7 @@ document.addEventListener("click", (e) => {
     openRateCard();
   } else if (act === "view-payment-history") {
     location.hash = "#rent";
-    global.setTimeout(function () { global.PGAnalytics && global.PGAnalytics.renderPaymentHistory && global.PGAnalytics.renderPaymentHistory(); }, 100);
+    setTimeout(function () { window.PGAnalytics && window.PGAnalytics.renderPaymentHistory && window.PGAnalytics.renderPaymentHistory(); }, 100);
   } else if (act === "add-rate") {
     closeDlg("dlg-rates");
     el("ra-label").value = "";

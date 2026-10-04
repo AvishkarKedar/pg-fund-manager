@@ -7,7 +7,7 @@
  */
 
 import { store, mutations } from "../store/index.js";
-import { esc, money, periodLabel, toast, el } from "./ui.js";
+import { esc, money, periodLabel, toast, el, openDrawer, closeDrawer } from "./ui.js";
 
 let host = null;
 let period = null;

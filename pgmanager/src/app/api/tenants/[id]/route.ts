@@ -1,155 +1,206 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { getCurrentMonth } from "@/lib/utils";
+import { db } from "@/lib/db";
+import { requireAuth, audit } from "@/lib/auth";
+import { readJson, ok, bad, handle } from "@/lib/api";
+import { Decimal } from "decimal.js";
+import { todayYm } from "@/lib/dates";
 
-// GET /api/tenants/[id]
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    await requireAuth();
-    const { id } = params;
+export const dynamic = "force-dynamic";
 
-    const [tenant, auditLogs] = await Promise.all([
-      prisma.tenant.findUnique({
-        where: { id },
-        include: {
-          assignments: {
-            include: {
-              bed: { include: { room: true } },
-              rentRecords: { orderBy: { month: "desc" } },
-            },
-          },
-          payments: {
-            where: { isReversed: false },
-            orderBy: { date: "desc" },
-          },
-          aliases: true,
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  return handle(async () => {
+    const { response } = await requireAuth();
+    if (response) return response;
+    const { id } = await ctx.params;
+
+    const tenant = await db.tenant.findUnique({
+      where: { id },
+      include: {
+        tenancies: {
+          orderBy: { startDate: "desc" },
+          include: { bed: { include: { room: true } } },
         },
-      }),
-      prisma.auditLog.findMany({
-        where: { entityId: id },
-        include: { user: { select: { name: true } } },
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      }),
-    ]);
-
-    if (!tenant) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
-    }
-
-    // Compute financial summary
-    const allPayments = tenant.payments.filter((p: any) => !p.isReversed);
-    const totalPaid = allPayments.reduce((s: number, p: any) => s + Number(p.amount), 0);
-
-    const currentAssignment = tenant.assignments.find((a: any) => a.isActive);
-    const monthlyRent = currentAssignment ? Number(currentAssignment.monthlyRent) : 0;
-
-    // Count paid months from rent records
-    const paidMonths = tenant.assignments.flatMap((a: any) =>
-      a.rentRecords.filter((r: any) => r.status === "PAID" || r.status === "ADVANCE")
-    ).length;
-    const totalMonths = tenant.assignments.flatMap((a: any) => a.rentRecords).length;
-
-    return NextResponse.json({
-      ...tenant,
-      _summary: {
-        totalPaid,
-        monthlyRent,
-        totalPayments: allPayments.length,
-        paidMonths,
-        totalMonths,
-        outstanding: currentAssignment
-          ? Math.max(0, monthlyRent - (currentAssignment.rentRecords[0]
-              ? Number(currentAssignment.rentRecords[0].amountPaid) : 0))
-          : 0,
+        payments: { orderBy: { date: "desc" }, where: { reversedAt: null } },
       },
-      _auditLogs: auditLogs.map((l: any) => ({
-        id: l.id,
-        action: l.action,
-        entity: l.entity,
-        user: l.user?.name || "System",
-        previousValue: l.previousValue,
-        newValue: l.newValue,
-        createdAt: l.createdAt,
+    });
+    if (!tenant) return bad("Tenant not found", 404);
+
+    const current = tenant.tenancies.find((t) => t.isActive) ?? null;
+    const invoices = current
+      ? await db.rentInvoice.findMany({
+          where: { tenancyId: current.id },
+          orderBy: { period: "desc" },
+        })
+      : [];
+
+    const outstanding = invoices
+      .filter((i) => i.status !== "WAIVED")
+      .reduce((s, i) => s + Math.max(0, Number(i.dueAmount) - Number(i.paidAmount)), 0);
+    const totalPaid = tenant.payments.reduce((s, p) => s + Number(p.amount), 0);
+
+    return ok({
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        phone: tenant.phone,
+        email: tenant.email,
+        idType: tenant.idType,
+        idNumber: tenant.idNumber,
+        emergencyContact: tenant.emergencyContact,
+        workplace: tenant.workplace,
+        notes: tenant.notes,
+        status: tenant.status,
+        createdAt: tenant.createdAt,
+      },
+      currentTenancy: current
+        ? {
+            id: current.id,
+            room: current.bed.room.number,
+            bed: current.bed.label,
+            bedId: current.bedId,
+            monthlyRent: Number(current.monthlyRent),
+            securityDeposit: Number(current.securityDeposit),
+            dueDay: current.dueDay,
+            startDate: current.startDate,
+            noticeDate: current.noticeDate,
+          }
+        : null,
+      tenancies: tenant.tenancies.map((t) => ({
+        id: t.id,
+        room: t.bed.room.number,
+        bed: t.bed.label,
+        startDate: t.startDate,
+        endDate: t.endDate,
+        monthlyRent: Number(t.monthlyRent),
+        isActive: t.isActive,
       })),
+      invoices: invoices.map((i) => ({
+        id: i.id,
+        period: i.period,
+        due: Number(i.dueAmount),
+        paid: Number(i.paidAmount),
+        status: i.status,
+        dueDate: i.dueDate,
+        method: i.method,
+        reference: i.reference,
+      })),
+      payments: tenant.payments.map((p) => ({
+        id: p.id,
+        amount: Number(p.amount),
+        date: p.date,
+        method: p.method,
+        reference: p.reference,
+        receiptNumber: p.receiptNumber,
+        notes: p.notes,
+        reversedAt: p.reversedAt,
+      })),
+      outstanding,
+      totalPaid,
     });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to load tenant" }, { status: 500 });
-  }
+  });
 }
 
-// PUT /api/tenants/[id]
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    const user = await requireAuth();
-    const { id } = params;
-    const body = await request.json();
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  return handle(async () => {
+    const { user, response } = await requireAuth();
+    if (response) return response;
+    const { id } = await ctx.params;
 
-    const tenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!tenant) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
+    const tenant = await db.tenant.findUnique({ where: { id } });
+    if (!tenant) return bad("Tenant not found", 404);
+
+    const body = await readJson<{
+      name?: string; phone?: string; email?: string; idType?: string; idNumber?: string;
+      emergencyContact?: string; workplace?: string; notes?: string;
+      monthlyRent?: number; dueDay?: number; noticeDate?: string | null;
+      transferToBedId?: string; clearNotice?: boolean;
+    }>(req);
+
+    const data: Record<string, unknown> = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) return bad("Name cannot be empty");
+      data.name = name;
+    }
+    if (body.phone !== undefined) data.phone = body.phone?.trim() || null;
+    if (body.email !== undefined) data.email = body.email?.trim() || null;
+    if (body.idType !== undefined) data.idType = body.idType || null;
+    if (body.idNumber !== undefined) data.idNumber = body.idNumber?.trim() || null;
+    if (body.emergencyContact !== undefined) data.emergencyContact = body.emergencyContact?.trim() || null;
+    if (body.workplace !== undefined) data.workplace = body.workplace?.trim() || null;
+    if (body.notes !== undefined) data.notes = body.notes?.trim() || null;
+
+    // notice handling
+    if (body.clearNotice) {
+      data.status = "ACTIVE";
+      data.notes = tenant.notes;
+      const current = await db.tenancy.findFirst({ where: { tenantId: id, isActive: true } });
+      if (current) {
+        await db.tenancy.update({ where: { id: current.id }, data: { noticeDate: null } });
+      }
+    } else if (body.noticeDate !== undefined) {
+      const noticeDate = body.noticeDate ? new Date(body.noticeDate) : new Date();
+      data.status = "NOTICE";
+      const current = await db.tenancy.findFirst({ where: { tenantId: id, isActive: true } });
+      if (current) {
+        await db.tenancy.update({ where: { id: current.id }, data: { noticeDate } });
+      }
     }
 
-    const updated = await prisma.tenant.update({
-      where: { id },
-      data: {
-        name: body.name || tenant.name,
-        phone: body.phone !== undefined ? body.phone : tenant.phone,
-        email: body.email !== undefined ? body.email : tenant.email,
-        emergencyContact: body.emergencyContact !== undefined ? body.emergencyContact : tenant.emergencyContact,
-        status: body.status || tenant.status,
-        notes: body.notes !== undefined ? body.notes : tenant.notes,
-      },
-    });
+    await db.tenant.update({ where: { id }, data });
 
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "UPDATE",
-        entity: "tenant",
-        entityId: id,
-        previousValue: JSON.stringify({ name: tenant.name }),
-        newValue: JSON.stringify({ name: updated.name, status: updated.status }),
-      },
-    });
+    // rent / due-day adjustments on the active tenancy
+    const current = await db.tenancy.findFirst({ where: { tenantId: id, isActive: true } });
+    if (current) {
+      const tData: Record<string, unknown> = {};
+      if (body.monthlyRent !== undefined) {
+        const rent = Number(body.monthlyRent);
+        if (!isFinite(rent) || rent < 0) return bad("Monthly rent must be positive");
+        tData.monthlyRent = new Decimal(rent);
+      }
+      if (body.dueDay !== undefined) {
+        const dueDay = Number(body.dueDay);
+        if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 28) return bad("Due day must be 1–28");
+        tData.dueDay = dueDay;
+      }
+      if (Object.keys(tData).length > 0) {
+        await db.tenancy.update({ where: { id: current.id }, data: tData });
+        // keep the current month's open invoice in sync with the new rent
+        await db.rentInvoice.updateMany({
+          where: { tenancyId: current.id, period: todayYm(), status: { in: ["DUE", "OVERDUE"] } },
+          data: tData.monthlyRent !== undefined ? { dueAmount: tData.monthlyRent } : {},
+        });
+      }
 
-    return NextResponse.json({ ok: true, tenant: updated });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to update tenant" }, { status: 500 });
-  }
-}
+      // transfer: history-preserving bed move
+      if (body.transferToBedId && body.transferToBedId !== current.bedId) {
+        const target = await db.bed.findUnique({
+          where: { id: body.transferToBedId },
+          include: { room: true, tenancies: { where: { isActive: true } } },
+        });
+        if (!target) return bad("Target bed not found", 404);
+        if (target.tenancies.length > 0) return bad(`Bed ${target.room.number}-${target.label} is occupied`, 409);
+        const today = new Date();
+        await db.tenancy.update({
+          where: { id: current.id },
+          data: { isActive: false, endDate: today },
+        });
+        await db.tenancy.create({
+          data: {
+            tenantId: id,
+            bedId: target.id,
+            startDate: today,
+            monthlyRent: body.monthlyRent !== undefined ? new Decimal(Number(body.monthlyRent)) : current.monthlyRent,
+            securityDeposit: current.securityDeposit,
+            dueDay: body.dueDay !== undefined ? Number(body.dueDay) : current.dueDay,
+            isActive: true,
+            notes: `Transferred from bed ${current.bedId}`,
+          },
+        });
+        await audit(user.id, "UPDATED", "Tenant", id, { transferred: `${target.room.number}-${target.label}` });
+      }
+    }
 
-// DELETE /api/tenants/[id]
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    const user = await requireAuth();
-    const { id } = params;
-
-    // Soft delete: mark as CHECKED_OUT, don't remove from DB
-    const updated = await prisma.tenant.update({
-      where: { id },
-      data: { status: "CHECKED_OUT" },
-    });
-
-    // Deactivate current assignment
-    await prisma.tenantAssignment.updateMany({
-      where: { tenantId: id, isActive: true },
-      data: { isActive: false, checkoutDate: new Date() },
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "UPDATE",
-        entity: "tenant",
-        entityId: id,
-        newValue: JSON.stringify({ status: "CHECKED_OUT" }),
-      },
-    });
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to remove tenant" }, { status: 500 });
-  }
+    await audit(user.id, "UPDATED", "Tenant", id, { fields: Object.keys(body) });
+    return ok({ success: true });
+  });
 }

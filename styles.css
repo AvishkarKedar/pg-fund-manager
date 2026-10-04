@@ -876,6 +876,7 @@ h2 { font-size: 16px; letter-spacing: -.018em; font-weight: 650; line-height: 1.
   padding: 12px 14px; font-size: 13.5px; font-weight: 500;
   box-shadow: var(--shadow-lg); min-width: 260px; max-width: 360px;
   animation: toast-in .2s ease both;
+  pointer-events: auto;
 }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .toast-icon { flex: none; font-size: 15px; line-height: 1.4; }

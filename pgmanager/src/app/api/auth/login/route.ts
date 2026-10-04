@@ -1,58 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { verifyPassword, createSession } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { verifyPassword, createSession, audit } from "@/lib/auth";
+import { readJson, ok, bad, handle } from "@/lib/api";
 
-export async function POST(request: NextRequest) {
-  try {
-    const { email, password } = await request.json();
+export async function POST(req: Request) {
+  return handle(async () => {
+    const { email, password } = await readJson<{ email?: string; password?: string }>(req);
+    const cleanEmail = String(email ?? "").trim().toLowerCase();
+    if (!cleanEmail || !password) return bad("Email and password are required");
 
-    if (!email || !password) {
-      return NextResponse.json(
-        { error: "Email and password are required" },
-        { status: 400 }
-      );
+    const user = await db.user.findUnique({ where: { email: cleanEmail } });
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      return bad("Invalid email or password", 401);
     }
-
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
-    });
-
-    if (!user || !user.isActive) {
-      return NextResponse.json(
-        { error: "Invalid email or password" },
-        { status: 401 }
-      );
-    }
-
-    const valid = await verifyPassword(password, user.passwordHash);
-    if (!valid) {
-      return NextResponse.json(
-        { error: "Invalid email or password" },
-        { status: 401 }
-      );
-    }
-
     await createSession(user.id);
-
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "LOGIN",
-        entity: "user",
-        entityId: user.id,
-      },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-    });
-  } catch (error) {
-    console.error("Login error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
-  }
+    await audit(user.id, "SYSTEM", "Auth", user.id, { message: "Signed in" });
+    return ok({ user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  });
 }

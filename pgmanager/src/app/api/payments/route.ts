@@ -1,189 +1,120 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { getCurrentMonth, generateReceiptNumber } from "@/lib/utils";
+import { readJson, ok, bad, handle } from "@/lib/api";
+import { recordPayment } from "@/lib/rent-engine";
+import { parseFlexibleDate, todayIST } from "@/lib/dates";
 
-// GET /api/payments — list payments
-export async function GET(request: NextRequest) {
-  try {
-    await requireAuth();
-    const { searchParams } = new URL(request.url);
-    const tenantId = searchParams.get("tenantId");
-    const month = searchParams.get("month");
-    const method = searchParams.get("method");
-    const limit = parseInt(searchParams.get("limit") || "100");
+export const dynamic = "force-dynamic";
 
-    // Get PG start date from settings
-    const startSetting = await prisma.setting.findUnique({ where: { key: "pg_start_date" } });
-    const pgStartDate = startSetting?.value || null;
+export async function GET(req: Request) {
+  return handle(async () => {
+    const { response } = await requireAuth();
+    if (response) return response;
 
-    const where: any = { isReversed: false };
-    if (tenantId) where.tenantId = tenantId;
-    if (month) where.rentMonth = month;
+    const url = new URL(req.url);
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const method = url.searchParams.get("method") ?? "";
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+    const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get("pageSize") ?? 50)));
+
+    const where: Record<string, unknown> = {};
     if (method) where.method = method;
-    if (pgStartDate) where.date = { gte: new Date(pgStartDate) };
+    if (from || to) {
+      where.date = {
+        ...(from ? { gte: parseFlexibleDate(from) ?? undefined } : {}),
+        ...(to ? { lte: parseFlexibleDate(to) ?? undefined } : {}),
+      };
+    }
+    if (q) {
+      where.OR = [
+        { receiptNumber: { contains: q } },
+        { reference: { contains: q } },
+        { tenant: { name: { contains: q } } },
+      ];
+    }
 
-    const payments = await prisma.payment.findMany({
-      where,
-      include: {
-        tenant: { select: { name: true, id: true } },
-        rentRecord: true,
-      },
-      orderBy: { date: "desc" },
-      take: limit,
-    });
+    const [total, payments] = await Promise.all([
+      db.payment.count({ where }),
+      db.payment.findMany({
+        where,
+        orderBy: { date: "desc" },
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+        include: {
+          tenant: true,
+          rentInvoice: { select: { period: true } },
+        },
+      }),
+    ]);
 
-    return NextResponse.json(
-      payments.map((p) => ({
-        id: p.id,
-        tenantId: p.tenantId,
-        tenantName: p.tenant.name,
-        amount: Number(p.amount),
-        date: p.date,
-        method: p.method,
-        purpose: p.purpose,
-        rentMonth: p.rentMonth,
-        transactionId: p.transactionId,
-        bankReference: p.bankReference,
-        receiptNumber: p.receiptNumber,
-        notes: p.notes,
-        createdAt: p.createdAt,
-      }))
-    );
-  } catch (error) {
-    console.error("Payments list error:", error);
-    return NextResponse.json({ error: "Failed to load payments" }, { status: 500 });
-  }
+    const list = payments.map((p) => ({
+      id: p.id,
+      tenantId: p.tenantId,
+      tenantName: p.tenant.name,
+      tenantPhone: p.tenant.phone,
+      period: p.rentInvoice?.period ?? null,
+      amount: Number(p.amount),
+      date: p.date,
+      method: p.method,
+      reference: p.reference,
+      receiptNumber: p.receiptNumber,
+      notes: p.notes,
+      reversedAt: p.reversedAt,
+    }));
+
+    const sum = payments.reduce((s, p) => s + Number(p.amount), 0);
+    return ok({ payments: list, total, page, pageSize, pageSum: sum });
+  });
 }
 
-// POST /api/payments — create a payment
-export async function POST(request: NextRequest) {
-  try {
-    const user = await requireAuth();
-    const body = await request.json();
+export async function POST(req: Request) {
+  return handle(async () => {
+    const { user, response } = await requireAuth();
+    if (response) return response;
 
-    const { tenantId, amount, date, method, purpose, rentMonth,
-            transactionId, bankReference, notes } = body;
+    const body = await readJson<{
+      tenantId?: string; amount?: number; date?: string; method?: string;
+      reference?: string; notes?: string; rentInvoiceId?: string;
+    }>(req);
 
-    if (!tenantId) {
-      return NextResponse.json({ error: "Tenant is required" }, { status: 400 });
-    }
-    if (!amount || parseFloat(amount) <= 0) {
-      return NextResponse.json({ error: "Amount must be greater than zero" }, { status: 400 });
-    }
+    const tenantId = String(body.tenantId ?? "");
+    if (!tenantId) return bad("tenantId is required");
+    const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) return bad("Tenant not found", 404);
 
-    const month = rentMonth || getCurrentMonth();
-    const paymentAmount = parseFloat(amount);
+    const amount = Number(body.amount);
+    if (!isFinite(amount) || amount <= 0) return bad("Amount must be greater than zero");
 
-    // Find or create rent record for this tenant and month
-    let assignment = await prisma.tenantAssignment.findFirst({
-      where: { tenantId, isActive: true },
+    const method = ["UPI", "CASH", "BANK", "CARD", "CHEQUE"].includes(String(body.method))
+      ? String(body.method)
+      : "UPI";
+    const date = body.date ? parseFlexibleDate(body.date) : todayIST();
+    if (!date) return bad("Invalid payment date");
+
+    const payment = await recordPayment({
+      tenantId,
+      rentInvoiceId: body.rentInvoiceId ?? null,
+      amount,
+      date,
+      method,
+      reference: body.reference?.trim() || null,
+      notes: body.notes?.trim() || null,
+      recordedById: user.id,
     });
 
-    if (!assignment) {
-      return NextResponse.json(
-        { error: "Tenant has no active room/bed assignment" },
-        { status: 400 }
-      );
-    }
-
-    let rentRecord = await prisma.rentRecord.findUnique({
-      where: { assignmentId_month: { assignmentId: assignment.id, month } },
-    });
-
-    if (!rentRecord) {
-      rentRecord = await prisma.rentRecord.create({
-        data: {
-          assignmentId: assignment.id,
-          tenantId,
-          bedId: assignment.bedId,
-          month,
-          rentDue: Number(assignment.monthlyRent),
-          status: "DUE",
+    return ok(
+      {
+        payment: {
+          id: payment.id,
+          amount: Number(payment.amount),
+          receiptNumber: payment.receiptNumber,
+          date: payment.date,
+          method: payment.method,
         },
-      });
-    }
-
-    // Create payment
-    const receiptNumber = generateReceiptNumber();
-    const payment = await prisma.payment.create({
-      data: {
-        tenantId,
-        amount: paymentAmount,
-        date: date ? new Date(date) : new Date(),
-        method: method || "BANK_TRANSFER",
-        purpose: purpose || "Rent",
-        rentMonth: month,
-        transactionId: transactionId || null,
-        bankReference: bankReference || null,
-        receiptNumber,
-        notes: notes || null,
-        createdBy: user.id,
-        rentRecordId: rentRecord.id,
       },
-    });
-
-    // Update rent record
-    const newPaid = Number(rentRecord.amountPaid) + paymentAmount;
-    const rentDue = Number(rentRecord.rentDue);
-    let newStatus: string;
-    if (newPaid >= rentDue) {
-      newStatus = newPaid > rentDue ? "ADVANCE" : "PAID";
-    } else {
-      newStatus = "PARTIAL";
-    }
-
-    await prisma.rentRecord.update({
-      where: { id: rentRecord.id },
-      data: { amountPaid: newPaid, status: newStatus as any },
-    });
-
-    // Create receipt
-    await prisma.receipt.create({
-      data: {
-        receiptNumber,
-        paymentId: payment.id,
-        tenantId,
-        tenantName: "", // Will be set by a trigger or we query
-        roomNumber: "",
-        bedNumber: "",
-        amount: paymentAmount,
-        paymentDate: payment.date,
-        paymentMethod: payment.method,
-        rentMonth: month,
-        previousBalance: rentDue - Number(rentRecord.amountPaid),
-        amountPaid: paymentAmount,
-        remainingBalance: Math.max(0, rentDue - newPaid),
-      },
-    });
-
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "CREATE",
-        entity: "payment",
-        entityId: payment.id,
-        newValue: JSON.stringify({ amount: paymentAmount, tenantId, month }),
-      },
-    });
-
-    // Create notification for overdue
-    if (newStatus === "OVERDUE") {
-      await prisma.notification.create({
-        data: {
-          title: "Payment overdue",
-          message: `Payment is overdue for rent month ${month}`,
-          type: "WARNING",
-          entityType: "payment",
-          entityId: payment.id,
-        },
-      });
-    }
-
-    return NextResponse.json({ ok: true, payment, receiptNumber });
-  } catch (error) {
-    console.error("Payment create error:", error);
-    return NextResponse.json({ error: "Failed to create payment" }, { status: 500 });
-  }
+      { status: 201 }
+    );
+  });
 }
