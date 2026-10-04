@@ -31,19 +31,20 @@ Demo login: **owner@pgdemo.in / owner123**
 
 | Area | Details |
 | --- | --- |
-| **Dashboard** | KPI cards with count-up animation, collections-vs-expenses chart, rent status, occupancy by floor, debtor list with one-tap WhatsApp reminders (from your template), expense breakdown + **budget health**, **vacancies ahead** (move-out notices), recent activity, **AI insights** (optional) |
+| **Dashboard** | KPI cards with count-up animation, collections-vs-expenses chart, rent status, occupancy by floor, debtor list with one-tap WhatsApp reminders (from your template) + **UPI collect QR**, expense breakdown + **budget health**, **vacancies ahead** (move-out notices), recent activity, **AI insights** (optional) |
 | **Rooms & beds** | Floor-grouped room cards, bed tiles (vacant/occupied/notice), add/edit/delete with occupied-bed guards |
-| **Tenants** | Full profiles, bed assignment & history-preserving transfers, notice period, check-out with settlement preview, payment backfill |
+| **Tenants** | Full profiles, bed assignment & history-preserving transfers, notice period, check-out with settlement preview, payment backfill, **broadcast composer** (message all/selected tenants) |
 | **Rent engine** | Monthly invoices auto-roll on read, PAID/PARTIAL/DUE/OVERDUE statuses, partial payments, undo (soft reverse), per-tenant due day + grace |
 | **Payments** | Append-only ledger, deterministic receipt numbers (RCP-YYYYMM-####), printable receipts, reversals |
 | **Budgets & templates** | Monthly per-category expense caps (settings) with over-budget warnings; customizable WhatsApp rent-reminder template with live preview |
+| **UPI collect** | Per-debtor "Collect via UPI" dialog: scannable QR code + deep link + copy (uses the UPI ID from Settings) |
 | **Reliability & statements** | Per-tenant on-time payment streak; printable monthly rent statement (A4) |
 | **Command palette** | Ctrl/Cmd+K global search across tenants & rooms + quick actions |
 | **Backup & restore** | One-file full JSON export/import (transactional restore with confirm) |
 | **Expenses** | Categories, vendor, monthly trend, CSV export |
 | **Issues** | Maintenance workflow with status stepper and auto-logging of repair costs as expenses |
 | **Excel import** | 3-step wizard: upload (xlsx/xls/csv/tsv/json) → auto-detected column mapping with editable preview → transactional apply. Auto-fixes phones, dates (day-first Indian format), rent amounts; "unpaid" never counts as paid; auto-sorts rooms & beds; dedupes tenants by phone |
-| **Reports** | 12-month performance, debtor aging, method split, CSV exports (ledger/tenants/payments/expenses) |
+| **Reports** | 12-month performance, debtor aging, method split, **security-deposits ledger**, CSV exports (ledger/tenants/payments/expenses) |
 | **Data doctor** | One-click *Sort & Fix*: renumbers bed slots, relabels A–H, merges duplicate tenants, self-heals every invoice status |
 | **Auth** | scrypt password hashing, httpOnly cookie sessions, 401 JSON (never redirects), audit log on every write |
 

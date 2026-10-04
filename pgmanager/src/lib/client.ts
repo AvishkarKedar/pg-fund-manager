@@ -422,6 +422,16 @@ export interface ReportsResponse {
   aging: Record<string, number>;
   debtors: { name: string; room: string; period: string; outstanding: number; status: string }[];
   methodSplit: { method: string; amount: number; count: number }[];
+  /** Security deposits held for every active tenancy (oldest first). */
+  deposits: {
+    name: string;
+    phone: string | null;
+    room: string;
+    deposit: number;
+    startDate: string;
+    months: number;
+  }[];
+  depositsTotal: number;
 }
 
 // ---------- maintenance ----------

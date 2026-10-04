@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
-  ArrowRightLeft, BellOff, BellRing, CalendarCheck, Download, MoreHorizontal,
+  ArrowRightLeft, BadgeCheck, BellOff, BellRing, CalendarCheck, Download, Megaphone, MoreHorizontal,
   MessageCircle, Phone, Search, Upload, UserPlus, Users,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -23,6 +23,7 @@ import { fmtDate, fmtINR, initials, RENT_REMINDER, telLink, todayIsoDate, todayY
 import { EmptyState, ErrorState, Money, PageHeader, StatusBadge } from "@/components/pg/bits";
 import { BackfillDialog, CheckoutDialog, TenantFormDialog, TransferDialog } from "@/components/pg/tenant-dialogs";
 import { TenantDetailSheet } from "@/components/pg/tenant-detail";
+import { BroadcastSheet } from "@/components/pg/broadcast-sheet";
 
 type ActionMode = "checkout" | "backfill";
 
@@ -56,6 +57,7 @@ export function TenantsView({
 
   const [sheetTenantId, setSheetTenantId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [editRow, setEditRow] = useState<TenantRow | null>(null);
   const [transferRow, setTransferRow] = useState<TenantRow | null>(null);
   const [action, setAction] = useState<{ id: string; mode: ActionMode } | null>(null);
@@ -100,6 +102,9 @@ export function TenantsView({
           <>
             <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => (window.location.href = `/api/reports/export?type=tenants&month=${month}`)}>
               <Download className="size-4" /> Export CSV
+            </Button>
+            <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setBroadcastOpen(true)}>
+              <Megaphone className="size-4" /> Broadcast
             </Button>
             <Button
               size="sm"
@@ -286,15 +291,24 @@ export function TenantsView({
                           <a href={telLink(t.phone)} className="flex size-9 items-center justify-center rounded-lg border border-border/60 hover:bg-muted" aria-label="Call">
                             <Phone className="size-4" />
                           </a>
-                          <a
-                            href={waLink(t.phone, RENT_REMINDER(t.name, t.current?.outstanding ?? 0, month))}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                            aria-label="WhatsApp"
-                          >
-                            <MessageCircle className="size-4" />
-                          </a>
+                          {(t.current?.outstanding ?? 0) > 0 ? (
+                            <a
+                              href={waLink(t.phone, RENT_REMINDER(t.name, t.current?.outstanding ?? 0, month))}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                              aria-label="Send rent reminder on WhatsApp"
+                            >
+                              <MessageCircle className="size-4" />
+                            </a>
+                          ) : (
+                            <span
+                              className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                              title="Nothing pending — all paid up"
+                            >
+                              <BadgeCheck className="size-4" />
+                            </span>
+                          )}
                         </>
                       )}
                       <RowActions
@@ -320,6 +334,7 @@ export function TenantsView({
       )}
 
       {/* dialogs */}
+      <BroadcastSheet open={broadcastOpen} onOpenChange={setBroadcastOpen} />
       <TenantDetailSheet
         open={!!sheetTenantId}
         onClose={() => setSheetTenantId(null)}

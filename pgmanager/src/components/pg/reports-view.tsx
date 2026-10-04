@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Bar, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { BarChart3, ChevronDown, CreditCard, Download, Percent, TrendingDown, Wallet } from "lucide-react";
+import { BarChart3, ChevronDown, CreditCard, Download, Landmark, MessageCircle, Percent, TrendingDown, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,11 +10,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApi, useSignalReload } from "@/hooks/pg/useApi";
 import type { ReportsResponse } from "@/lib/client";
-import { fmtINR, monthLabel, todayYm } from "@/lib/client";
+import { fmtINR, monthLabel, todayYm, waLink } from "@/lib/client";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, KpiCard, Money, MonthNav, PageHeader, StatusBadge } from "@/components/pg/bits";
 
 const DONUT_COLORS = ["#10b981", "#f59e0b", "#14b8a6", "#84cc16", "#fb923c", "#78716c", "#0d9488", "#a16207", "#a3a3a3", "#57534e"];
+
+/** WhatsApp note sent from the deposits ledger (mirrors RENT_REMINDER's tone). */
+const DEPOSIT_NOTE = (name: string, deposit: number, room: string) =>
+  `Hi ${name.split(" ")[0]}, your security deposit of ${fmtINR(deposit)} for ${room} is safely held with us at Sunrise PG. Thank you!`;
 
 export function ReportsView({ refreshSignal }: { refreshSignal: number }) {
   const [month, setMonth] = useState(todayYm());
@@ -260,6 +264,52 @@ export function ReportsView({ refreshSignal }: { refreshSignal: number }) {
                     </TableBody>
                   </Table>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* security deposits ledger */}
+          <Card className="rounded-xl border-border/60 shadow-sm">
+            <CardHeader className="flex-row items-start justify-between pb-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Landmark className="size-4.5 text-muted-foreground" /> Security deposits
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Refundable holdings for active tenancies</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-sm font-semibold tabular-nums">{fmtINR(data.depositsTotal)}</p>
+                <p className="text-xs text-muted-foreground">
+                  held across {data.deposits.length} tenanc{data.deposits.length === 1 ? "y" : "ies"}
+                </p>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {data.deposits.length === 0 || data.depositsTotal === 0 ? (
+                <EmptyState icon={Landmark} title="No active tenancies with deposits" className="py-8" />
+              ) : (
+                <ul className="thin-scroll max-h-96 space-y-1 overflow-y-auto pr-1">
+                  {data.deposits.map((d, i) => (
+                    <li key={`${d.name}-${i}`} className="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.name}</p>
+                        <p className="text-xs text-muted-foreground">{d.room} · {d.months} mo</p>
+                      </div>
+                      <span className="shrink-0 text-sm font-medium tabular-nums">{fmtINR(d.deposit)}</span>
+                      {d.phone && (
+                        <a
+                          href={waLink(d.phone, DEPOSIT_NOTE(d.name, d.deposit, d.room))}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`WhatsApp ${d.name}`}
+                          className="flex size-8 shrink-0 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
+                        >
+                          <MessageCircle className="size-3.5" />
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </CardContent>
           </Card>

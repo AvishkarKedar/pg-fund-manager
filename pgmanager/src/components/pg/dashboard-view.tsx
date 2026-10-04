@@ -8,7 +8,7 @@ import {
 } from "recharts";
 import {
   ArrowDownRight, ArrowUpRight, BedDouble, CalendarDays, DoorOpen, MessageCircle,
-  Phone, PiggyBank, ReceiptIndianRupee, Sparkles, TrendingDown, Users, Wallet,
+  Phone, PiggyBank, QrCode, ReceiptIndianRupee, Sparkles, TrendingDown, Users, Wallet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import type { DashboardResponse, InsightsResponse, SettingsResponse } from "@/li
 import { fmtINR, fmtDate, renderReminderTemplate, timeAgo, todayYm, waLink, telLink, monthLabel } from "@/lib/client";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, KpiCard, Money, MonthNav, PageHeader, SectionLabel, StatusBadge } from "@/components/pg/bits";
+import { UpiCollectDialog, type UpiCollectTarget } from "@/components/pg/upi-collect-dialog";
 
 const DONUT_COLORS = ["#10b981", "#f59e0b", "#14b8a6", "#84cc16", "#fb923c", "#78716c", "#0d9488", "#a16207", "#a3a3a3", "#57534e"];
 
@@ -93,6 +94,8 @@ function DashboardBody({ data, insightsNonce }: { data: DashboardData; insightsN
   const { data: settingsData } = useApi<SettingsResponse>("/api/settings");
   const settings = settingsData?.settings ?? null;
   const property = settings?.property ?? null;
+  // UPI collect dialog — one shared instance, target picks the debtor
+  const [upiTarget, setUpiTarget] = useState<UpiCollectTarget | null>(null);
   const reminderMessage = (name: string, room: string, bed: string, outstanding: number, phone: string | null) =>
     renderReminderTemplate(settings?.reminderTemplate, {
       name,
@@ -254,32 +257,51 @@ function DashboardBody({ data, insightsNonce }: { data: DashboardData; insightsN
               ) : (
                 <ul className="thin-scroll max-h-72 space-y-1 overflow-y-auto pr-1">
                   {data.debtors.map((d) => (
-                    <li key={d.tenantId} className="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60">
-                      <div className="min-w-0 flex-1">
+                    <li key={d.tenantId} className="flex items-start justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60">
+                      <div className="min-w-0 flex-1 pt-0.5">
                         <p className="truncate text-sm font-medium">{d.name}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="mt-0.5 text-xs text-muted-foreground">
                           Room {d.room} · Bed {d.bed}
                         </p>
                       </div>
-                      <Money value={d.outstanding} className="text-sm text-rose-600 dark:text-rose-400" />
-                      <StatusBadge status={d.status} />
-                      <div className="flex items-center gap-0.5">
-                        {d.phone && (
-                          <>
-                            <a href={telLink(d.phone)} aria-label={`Call ${d.name}`} className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                              <Phone className="size-3.5" />
-                            </a>
-                            <a
-                              href={waLink(d.phone, reminderMessage(d.name, d.room, d.bed, d.outstanding, d.phone))}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label={`WhatsApp ${d.name}`}
-                              className="flex size-8 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
-                            >
-                              <MessageCircle className="size-3.5" />
-                            </a>
-                          </>
-                        )}
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <Money value={d.outstanding} className="text-sm text-rose-600 dark:text-rose-400" />
+                          <StatusBadge status={d.status} />
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          {d.phone && (
+                            <>
+                              <a href={telLink(d.phone)} aria-label={`Call ${d.name}`} className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                                <Phone className="size-3.5" />
+                              </a>
+                              <a
+                                href={waLink(d.phone, reminderMessage(d.name, d.room, d.bed, d.outstanding, d.phone))}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`WhatsApp ${d.name}`}
+                                className="flex size-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
+                              >
+                                <MessageCircle className="size-3.5" />
+                              </a>
+                            </>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            aria-label={`Collect ${fmtINR(d.outstanding)} from ${d.name} via UPI`}
+                            onClick={() =>
+                              setUpiTarget({
+                                name: d.name,
+                                amount: d.outstanding,
+                                note: `Rent ${monthName}${property?.name ? ` — ${property.name}` : ""}`,
+                              })
+                            }
+                          >
+                            <QrCode className="size-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     </li>
                   ))}
@@ -375,6 +397,8 @@ function DashboardBody({ data, insightsNonce }: { data: DashboardData; insightsN
           </Card>
         </motion.div>
       </motion.div>
+
+      <UpiCollectDialog open={!!upiTarget} onOpenChange={(o) => !o && setUpiTarget(null)} target={upiTarget} />
     </div>
   );
 }
@@ -549,48 +573,50 @@ function VacanciesCard({ vacancies }: { vacancies: VacancyRow[] }) {
             {vacancies.map((v) => {
               const soon = v.daysOnNotice >= 15; // bed will free soon — amber highlight
               return (
-                <li key={v.tenantId} className="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60">
-                  <div className="min-w-0 flex-1">
+                <li key={v.tenantId} className="flex items-start justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60">
+                  <div className="min-w-0 flex-1 pt-0.5">
                     <div className="flex items-center gap-1.5">
                       <p className="truncate text-sm font-medium">{v.name}</p>
                       <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                         {v.room}·{v.bed}
                       </span>
                     </div>
-                    <p className="text-xs text-muted-foreground">on notice since {fmtDate(v.noticeDate)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">on notice since {fmtDate(v.noticeDate)}</p>
                   </div>
-                  <span
-                    title={`${v.daysOnNotice} day${v.daysOnNotice === 1 ? "" : "s"} on notice`}
-                    className={cn(
-                      "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums",
-                      soon ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-muted text-muted-foreground"
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span
+                      title={`${v.daysOnNotice} day${v.daysOnNotice === 1 ? "" : "s"} on notice`}
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-xs font-medium tabular-nums",
+                        soon ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {v.daysOnNotice}d
+                    </span>
+                    {v.phone && (
+                      <div className="flex items-center gap-0.5">
+                        <a
+                          href={telLink(v.phone)}
+                          aria-label={`Call ${v.name}`}
+                          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        >
+                          <Phone className="size-3.5" />
+                        </a>
+                        <a
+                          href={waLink(
+                            v.phone,
+                            `Hi ${v.name.split(" ")[0]}, confirming your move-out plans from Room ${v.room}? — ${propertyName}`
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`WhatsApp ${v.name}`}
+                          className="flex size-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
+                        >
+                          <MessageCircle className="size-3.5" />
+                        </a>
+                      </div>
                     )}
-                  >
-                    {v.daysOnNotice}d
-                  </span>
-                  {v.phone && (
-                    <div className="flex items-center gap-0.5">
-                      <a
-                        href={telLink(v.phone)}
-                        aria-label={`Call ${v.name}`}
-                        className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      >
-                        <Phone className="size-3.5" />
-                      </a>
-                      <a
-                        href={waLink(
-                          v.phone,
-                          `Hi ${v.name.split(" ")[0]}, confirming your move-out plans from Room ${v.room}? — ${propertyName}`
-                        )}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`WhatsApp ${v.name}`}
-                        className="flex size-8 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
-                      >
-                        <MessageCircle className="size-3.5" />
-                      </a>
-                    </div>
-                  )}
+                  </div>
                 </li>
               );
             })}

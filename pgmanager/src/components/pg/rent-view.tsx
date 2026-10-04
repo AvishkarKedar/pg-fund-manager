@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download, FileText,
-  History, MessageCircle, Phone, ReceiptIndianRupee, Undo2, Users,
+  History, MessageCircle, Phone, QrCode, ReceiptIndianRupee, Undo2, Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, KpiCard, Money, MonthNav, PageHeader, SectionLabel, StatusBadge } from "@/components/pg/bits";
 import { MarkPaidDialog } from "@/components/pg/mark-paid-dialog";
 import { StatementPrintDialog, type StatementData } from "@/components/pg/statement-print";
+import { UpiCollectDialog, type UpiCollectTarget } from "@/components/pg/upi-collect-dialog";
 
 type SortKey = "name" | "room" | "rent" | "outstanding" | "status";
 
@@ -43,6 +44,8 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
   const [historyRow, setHistoryRow] = useState<RentRow | null>(null);
   const [remindOpen, setRemindOpen] = useState(false);
   const [statementOpen, setStatementOpen] = useState(false);
+  // UPI collect dialog — one shared instance, target picks the row
+  const [upiTarget, setUpiTarget] = useState<UpiCollectTarget | null>(null);
   // property profile for the statement header + reminder template for WhatsApp links
   const { data: settingsData } = useApi<SettingsResponse>("/api/settings");
 
@@ -266,6 +269,13 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
                         expanded={expanded === r.invoiceId}
                         onToggle={() => setExpanded(expanded === r.invoiceId ? null : r.invoiceId)}
                         onMarkPaid={() => setMarkPaid(r)}
+                        onCollect={() =>
+                          setUpiTarget({
+                            name: r.name,
+                            amount: r.outstanding,
+                            note: `Rent ${data.label}${settingsData?.settings?.property?.name ? ` — ${settingsData.settings.property.name}` : ""}`,
+                          })
+                        }
                         onHistory={() => setHistoryRow(r)}
                       />
                     ))}
@@ -296,6 +306,7 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
         settings={settingsData?.settings ?? null}
       />
       <StatementPrintDialog open={statementOpen} onClose={() => setStatementOpen(false)} data={statement} />
+      <UpiCollectDialog open={!!upiTarget} onOpenChange={(o) => !o && setUpiTarget(null)} target={upiTarget} />
     </div>
   );
 }
@@ -321,7 +332,7 @@ function SortHead({
         className={cn("inline-flex items-center gap-1 rounded font-medium hover:text-foreground", sort.key === k && "text-emerald-600 dark:text-emerald-400")}
       >
         {label}
-        <Icon className="size-3" />
+        <Icon className={cn("size-3", sort.key === k ? "" : "text-foreground/60 dark:text-foreground/50")} />
       </button>
     </TableHead>
   );
@@ -332,12 +343,14 @@ function RentRowView({
   expanded,
   onToggle,
   onMarkPaid,
+  onCollect,
   onHistory,
 }: {
   row: RentRow;
   expanded: boolean;
   onToggle: () => void;
   onMarkPaid: () => void;
+  onCollect: () => void;
   onHistory: () => void;
 }) {
   const overdue = row.outstanding > 0;
@@ -375,22 +388,39 @@ function RentRowView({
           />
         </TableCell>
         <TableCell><StatusBadge status={row.invoiceStatus} /></TableCell>
-        <TableCell className="max-w-40 truncate text-xs text-muted-foreground">
-          {row.method ? `${row.method}${row.reference ? ` · ${row.reference}` : ""}` : "—"}
+        <TableCell className="text-xs text-muted-foreground">
+          <span className="block max-w-40 truncate" title={row.method ? `${row.method}${row.reference ? ` · ${row.reference}` : ""}` : undefined}>
+            {row.method ? `${row.method}${row.reference ? ` · ${row.reference}` : ""}` : "—"}
+          </span>
         </TableCell>
         <TableCell className="text-right">
           <div className="flex justify-end gap-1.5">
             {row.outstanding > 0 && (
-              <Button
-                size="sm"
-                className="h-8 bg-emerald-600 px-2.5 text-xs hover:bg-emerald-700"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMarkPaid();
-                }}
-              >
-                Mark paid
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-8"
+                  aria-label="Collect via UPI"
+                  title="Collect via UPI"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCollect();
+                  }}
+                >
+                  <QrCode className="size-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 bg-emerald-600 px-2.5 text-xs hover:bg-emerald-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkPaid();
+                  }}
+                >
+                  Mark paid
+                </Button>
+              </>
             )}
             <Button
               variant="outline"

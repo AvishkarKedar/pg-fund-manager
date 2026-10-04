@@ -171,7 +171,9 @@ export function PaymentsView({ refreshSignal, property }: { refreshSignal: numbe
                           {p.method}
                         </span>
                       </TableCell>
-                      <TableCell className="max-w-36 truncate text-xs text-muted-foreground">{p.reference ?? "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <span className="block max-w-36 truncate" title={p.reference ?? undefined}>{p.reference ?? "—"}</span>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           {p.reversedAt ? (

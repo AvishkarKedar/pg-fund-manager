@@ -63,12 +63,10 @@ export async function GET() {
     const fallback = buildFallbackInsights(facts);
 
     try {
-      // Optional dependency: if z-ai-web-dev-sdk is installed, use the LLM;
-      // otherwise fall through to deterministic local insights.
+      // Optional SDK: indirect dynamic import keeps builds green when the package is absent.
       const dynamicImport = new Function("m", "return import(m)") as (m: string) => Promise<{ default?: { create: () => Promise<{ chat: { completions: { create: (args: unknown) => Promise<{ choices?: Array<{ message?: { content?: string } }> } } } } }> } }>;
-      const mod = await dynamicImport("z-ai-web-dev-sdk").catch(() => null);
-      if (!mod?.default) throw new Error("LLM SDK not installed — using local insights");
-      const zai = await mod.default.create();
+      const { default: ZAI } = await dynamicImport("z-ai-web-dev-sdk");
+      const zai = await ZAI.create();
       const completion = await zai.chat.completions.create({
         messages: [
           {

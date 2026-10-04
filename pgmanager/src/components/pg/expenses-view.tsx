@@ -363,7 +363,7 @@ function BudgetsCard({ month, rows, loading }: { month: string; rows: BudgetRow[
               <span className="text-sm font-semibold tabular-nums">
                 {fmtINR(totalSpent)} <span className="font-normal text-muted-foreground">of {fmtINR(totalBudget)}</span>
                 {totalSpent > totalBudget && (
-                  <span className="ml-2 text-xs font-semibold text-rose-600 dark:text-rose-400">
+                  <span className="ml-2 text-xs font-semibold text-rose-700 dark:text-rose-400">
                     Over by {fmtINR(totalSpent - totalBudget)}
                   </span>
                 )}
@@ -396,7 +396,7 @@ function BudgetRowView({ row }: { row: BudgetRow }) {
         <div className={cn("h-full rounded-full transition-all", bar)} style={{ width: `${width}%` }} />
       </div>
       {over && (
-        <p className="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">
+        <p className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400">
           Over by {fmtINR(row.spent - row.budget)}
         </p>
       )}

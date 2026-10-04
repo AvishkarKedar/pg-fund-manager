@@ -5,6 +5,16 @@ import { todayYm, periodLabel, periodStart, addMonths } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
+/** Full months elapsed between two dates (never negative). */
+function monthDiff(from: Date, to: Date): number {
+  let months =
+    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 +
+    (to.getUTCMonth() - from.getUTCMonth());
+  // a month only counts once the day-of-month has been reached
+  if (to.getUTCDate() < from.getUTCDate()) months -= 1;
+  return Math.max(0, months);
+}
+
 export async function GET(req: Request) {
   return handle(async () => {
     const { response } = await requireAuth();
@@ -95,6 +105,22 @@ export async function GET(req: Request) {
       methodSplit.set(p.method, entry);
     }
 
+    // security deposits ledger — every active tenancy's refundable holding
+    const activeTenancies = await db.tenancy.findMany({
+      where: { isActive: true },
+      include: { tenant: true, bed: { include: { room: true } } },
+      orderBy: { startDate: "asc" },
+    });
+    const deposits = activeTenancies.map((t) => ({
+      name: t.tenant.name,
+      phone: t.tenant.phone,
+      room: t.bed ? `${t.bed.room.number}${t.bed.label ? ` · ${t.bed.label}` : ""}` : "—",
+      deposit: Number(t.securityDeposit ?? 0),
+      startDate: t.startDate.toISOString().slice(0, 10),
+      months: monthDiff(t.startDate, new Date()), // months since start, minimum 0
+    }));
+    const depositsTotal = deposits.reduce((s, d) => s + d.deposit, 0);
+
     return ok({
       month,
       label: periodLabel(month),
@@ -119,6 +145,8 @@ export async function GET(req: Request) {
       aging,
       debtors: debtors.sort((a, b) => b.outstanding - a.outstanding).slice(0, 15),
       methodSplit: [...methodSplit.entries()].map(([method, v]) => ({ method, ...v })),
+      deposits,
+      depositsTotal,
     });
   });
 }
