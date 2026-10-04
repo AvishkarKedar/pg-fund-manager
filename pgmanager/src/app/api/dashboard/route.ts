@@ -7,6 +7,7 @@ import {
   periodLabel,
   addMonths,
   periodStart,
+  toDateInput,
 } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -163,6 +164,35 @@ export async function GET(req: Request) {
       })),
     ].sort((a, b) => (a.at < b.at ? 1 : -1));
 
+    // vacancies ahead — active tenancies on move-out notice (earliest notice first:
+    // the longest-standing notice is the bed the owner must refill soonest)
+    const notices = await db.tenancy.findMany({
+      where: { isActive: true, noticeDate: { not: null } },
+      include: { tenant: true, bed: { include: { room: true } } },
+      orderBy: { noticeDate: "asc" },
+      take: 6,
+    });
+    const todayKey = toDateInput(todayIST());
+    const vacancies = notices.flatMap((t) => {
+      if (!t.noticeDate) return [];
+      // whole days between the notice date and today, both taken as IST calendar days
+      const daysOnNotice = Math.max(
+        0,
+        Math.round((Date.parse(todayKey) - Date.parse(toDateInput(t.noticeDate))) / 86_400_000)
+      );
+      return [
+        {
+          tenantId: t.tenantId,
+          name: t.tenant.name,
+          phone: t.tenant.phone,
+          room: t.bed.room.number,
+          bed: t.bed.label,
+          noticeDate: t.noticeDate.toISOString(),
+          daysOnNotice,
+        },
+      ];
+    });
+
     return ok({
       month,
       monthLabel: periodLabel(month),
@@ -191,6 +221,7 @@ export async function GET(req: Request) {
         .sort((a, b) => b.amount - a.amount),
       methodSplit: [...methodSplit.entries()].map(([method, v]) => ({ method, ...v })),
       recentActivity: activity.slice(0, 12),
+      vacancies,
     });
   });
 }

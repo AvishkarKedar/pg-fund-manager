@@ -117,31 +117,52 @@ export function ImportWizard({ onImported, onGoDashboard }: { onImported: () => 
           { n: 1, label: "Upload file", icon: FileUp },
           { n: 2, label: "Review mapping", icon: Table2 },
           { n: 3, label: "Done", icon: CheckCircle2 },
-        ].map((s, i) => (
-          <li key={s.n} className="flex flex-1 items-center gap-2 sm:gap-3">
-            <span
-              className={cn(
-                "flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition-colors",
-                step > s.n
-                  ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                  : step === s.n
-                    ? "border-emerald-600 bg-emerald-600 text-white"
-                    : "border-border/60 text-muted-foreground"
+        ].map((s, i) => {
+          const done = step > s.n;
+          const active = step === s.n;
+          return (
+            <li key={s.n} className="flex flex-1 items-center gap-2 sm:gap-3">
+              <span
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition-all",
+                  done
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                    : active
+                      ? "border-emerald-600 bg-emerald-600 text-white ring-4 ring-emerald-500/15"
+                      : "border-border/60 text-muted-foreground"
+                )}
+              >
+                {done ? <CheckCircle2 className="size-4" /> : <s.icon className="size-4" />}
+              </span>
+              <span
+                className={cn(
+                  "hidden text-xs sm:block",
+                  active
+                    ? "font-semibold text-foreground"
+                    : done
+                      ? "font-medium text-foreground"
+                      : "font-medium text-muted-foreground"
+                )}
+              >
+                {s.label}
+              </span>
+              {i < 2 && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "h-0.5 flex-1 rounded-full transition-colors",
+                    done ? "bg-emerald-500/60" : "bg-border dark:bg-border/80"
+                  )}
+                />
               )}
-            >
-              {step > s.n ? <CheckCircle2 className="size-4" /> : <s.icon className="size-4" />}
-            </span>
-            <span className={cn("hidden text-xs font-medium sm:block", step >= s.n ? "text-foreground" : "text-muted-foreground")}>
-              {s.label}
-            </span>
-            {i < 2 && <span className={cn("h-px flex-1", step > s.n ? "bg-emerald-500/40" : "bg-border")} />}
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
 
       {step === 1 && (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
+        <div className="grid gap-6 md:grid-cols-[2fr_1fr] lg:max-w-5xl">
+          <div>
             <button
               onClick={() => inputRef.current?.click()}
               onDragOver={(e) => {
@@ -156,21 +177,39 @@ export function ImportWizard({ onImported, onGoDashboard }: { onImported: () => 
                 if (f) handleFile(f);
               }}
               className={cn(
-                "flex w-full flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition-colors md:p-16",
+                "flex w-full flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition-all md:p-14",
                 dragging
-                  ? "border-emerald-500 bg-emerald-500/5"
+                  ? "scale-[1.01] border-emerald-500 bg-emerald-500/10"
                   : "border-border hover:border-emerald-500/50 hover:bg-emerald-500/5"
               )}
               aria-label="Upload spreadsheet"
             >
-              <div className="flex size-14 items-center justify-center rounded-xl bg-emerald-500/10">
-                <FileSpreadsheet className="size-7 text-emerald-600 dark:text-emerald-400" />
+              <div
+                className={cn(
+                  "flex size-14 items-center justify-center rounded-xl transition-colors",
+                  dragging ? "bg-emerald-600 text-white" : "bg-emerald-500/10"
+                )}
+              >
+                <FileSpreadsheet className={cn("size-7", dragging ? "text-white" : "text-emerald-600 dark:text-emerald-400")} />
               </div>
               <div>
-                <p className="text-sm font-semibold">Drop your Excel / CSV here or browse</p>
-                <p className="mt-1 text-xs text-muted-foreground">.xlsx · .xls · .csv · .tsv · .json — up to 8 MB, 2000 rows</p>
+                <p className={cn("text-sm font-semibold", dragging && "text-emerald-700 dark:text-emerald-400")}>
+                  {dragging ? "Drop to upload" : "Drop your Excel / CSV here or browse"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {dragging ? "Release the file and we'll start reading it" : ".xlsx · .xls · .csv · .tsv · .json — up to 8 MB, 2000 rows"}
+                </p>
               </div>
-              <span className="rounded-lg border border-border/60 px-4 py-2 text-xs font-medium">Choose file</span>
+              <span
+                className={cn(
+                  "rounded-lg border px-4 py-2 text-xs font-medium transition-colors",
+                  dragging
+                    ? "border-transparent bg-emerald-600 text-white"
+                    : "border-border/60"
+                )}
+              >
+                {dragging ? "Release to upload" : "Choose file"}
+              </span>
             </button>
             <input
               ref={inputRef}

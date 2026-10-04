@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Clock, Loader2, Plus, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -132,6 +133,31 @@ function ageInDays(iso: string): number {
   return Math.max(0, Math.floor((Date.now() - then) / 86400000));
 }
 
+/* Status pills get a treatment distinct from priority chips (rose/amber):
+ * Open = neutral outline · In progress = solid slate + pulsing dot · Resolved = emerald. */
+function IssueStatusPill({ status }: { status: string }) {
+  if (status === "IN_PROGRESS") {
+    return (
+      <Badge variant="outline" className="gap-1.5 border-transparent bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900">
+        <span className="size-1.5 animate-pulse rounded-full bg-white dark:bg-slate-900" />
+        In progress
+      </Badge>
+    );
+  }
+  if (status === "RESOLVED") {
+    return (
+      <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+        Resolved
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="border-slate-300 bg-transparent text-slate-600 dark:border-slate-600 dark:text-slate-400">
+      Open
+    </Badge>
+  );
+}
+
 function IssueCard({
   row,
   busy,
@@ -147,48 +173,49 @@ function IssueCard({
   const nextLabel = row.status === "OPEN" ? "Start work" : row.status === "IN_PROGRESS" ? "Resolve" : "Reopen";
   return (
     <Card className="flex flex-col rounded-xl border-border/60 shadow-sm transition-shadow hover:shadow-md">
-      <CardContent className="flex flex-1 flex-col gap-3 p-4">
+      <CardContent className="flex flex-1 flex-col gap-3 p-5">
+        {/* title + priority chip top */}
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm font-semibold leading-snug">{row.title}</p>
-          <StatusBadge status={row.priority} />
+          <StatusBadge status={row.priority} className="shrink-0" />
         </div>
+        {/* meta row */}
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {row.roomLabel && (
-            <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Room {row.roomLabel}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-foreground/75">Room {row.roomLabel}</span>
           )}
-          <span className="rounded-full bg-muted px-2 py-0.5 font-medium">{row.category.charAt(0) + row.category.slice(1).toLowerCase()}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-foreground/75">{row.category.charAt(0) + row.category.slice(1).toLowerCase()}</span>
           <span className="ml-auto flex items-center gap-1">
             <Clock className="size-3.5" />
             {age === 0 ? "today" : `${age}d old`}
           </span>
         </div>
+        {/* description */}
         {row.notes && <p className="line-clamp-2 text-sm text-muted-foreground">{row.notes}</p>}
         {row.status === "RESOLVED" && row.cost != null && row.cost > 0 && (
           <p className="text-xs text-muted-foreground">
             Repair cost: <Money value={row.cost} />
           </p>
         )}
-        <div className="mt-auto flex items-center gap-2 pt-1">
-          <StatusBadge status={row.status} />
-          <div className="ml-auto flex items-center gap-1.5">
-            {row.status === "IN_PROGRESS" && (
-              <Button variant="outline" size="sm" className="h-9 gap-1 text-xs" disabled={busy} onClick={onResolve}>
-                <CheckCircle2 className="size-3.5" /> Resolve
-              </Button>
-            )}
-            {row.status !== "IN_PROGRESS" && (
-              <Button
-                variant={row.status === "OPEN" ? "outline" : "ghost"}
-                size="sm"
-                className="h-9 gap-1 text-xs"
-                disabled={busy}
-                onClick={onAdvance}
-              >
-                {busy ? <Loader2 className="size-3.5 animate-spin" /> : row.status === "RESOLVED" ? <AlertCircle className="size-3.5" /> : <ArrowRight className="size-3.5" />}
-                {nextLabel}
-              </Button>
-            )}
-          </div>
+        {/* footer: status pill bottom-left, action bottom-right */}
+        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+          <IssueStatusPill status={row.status} />
+          {row.status === "IN_PROGRESS" ? (
+            <Button variant="outline" size="sm" className="h-9 gap-1 text-xs" disabled={busy} onClick={onResolve}>
+              <CheckCircle2 className="size-3.5" /> Resolve
+            </Button>
+          ) : (
+            <Button
+              variant={row.status === "OPEN" ? "outline" : "ghost"}
+              size="sm"
+              className="h-9 gap-1 text-xs"
+              disabled={busy}
+              onClick={onAdvance}
+            >
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : row.status === "RESOLVED" ? <AlertCircle className="size-3.5" /> : <ArrowRight className="size-3.5" />}
+              {nextLabel}
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

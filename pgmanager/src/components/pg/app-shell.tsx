@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BarChart3, BedDouble, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut,
-  Menu, Moon, ReceiptIndianRupee, RefreshCw, Settings as SettingsIcon, Sparkles,
+  Menu, Moon, ReceiptIndianRupee, RefreshCw, Search, Settings as SettingsIcon, Sparkles,
   Sun, TrendingDown, Users, Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { api } from "@/hooks/pg/useApi";
 import { usePgTheme } from "@/hooks/pg/useTheme";
 import type { MeResponse } from "@/lib/client";
@@ -25,12 +25,13 @@ import { IssuesView } from "@/components/pg/issues-view";
 import { ImportWizard } from "@/components/pg/import-wizard";
 import { ReportsView } from "@/components/pg/reports-view";
 import { SettingsView } from "@/components/pg/settings-view";
+import { CommandPalette, isMac } from "@/components/pg/command-palette";
 
 export type ViewKey =
   | "dashboard" | "rooms" | "tenants" | "rent" | "payments"
   | "expenses" | "issues" | "import" | "reports" | "settings";
 
-interface NavItem {
+export interface NavItem {
   key: ViewKey;
   label: string;
   subtitle: string;
@@ -59,11 +60,23 @@ export function AppShell({ me, reloadMe }: { me: MeResponse; reloadMe: () => voi
   const [focusTenantId, setFocusTenantId] = useState<string | null>(null);
   const [fixing, setFixing] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const { toggle: toggleTheme } = usePgTheme();
 
   const user = me.user!;
   const propertyName = me.settings?.property?.name || "My PG";
-  const nav = NAV.find((n) => n.key === view)!;
+
+  // Ctrl/Cmd+K opens the command palette from anywhere in the app
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, []);
 
   function navigate(next: ViewKey) {
     setView(next);
@@ -179,19 +192,43 @@ export function AppShell({ me, reloadMe }: { me: MeResponse; reloadMe: () => voi
               PG
             </div>
             <p className="min-w-0 flex-1 truncate text-sm font-semibold">{propertyName}</p>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9"
+              aria-label="Search"
+              onClick={() => setPaletteOpen(true)}
+            >
+              <Search className="size-4" />
+            </Button>
             {themeToggle}
             <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => navigate("settings")}>
               <SettingsIcon className="size-4" />
             </Button>
           </header>
 
-          {/* desktop header */}
-          <header className="hidden items-center justify-between gap-4 border-b border-border/60 px-8 py-4 md:flex print:hidden">
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight">{nav.label}</h2>
-              <p className="text-sm text-muted-foreground">{nav.subtitle}</p>
+          {/* desktop header — property context + quick actions (view name lives in each view's H1) */}
+          <header className="hidden items-center justify-between gap-4 border-b border-border/60 px-8 py-3.5 md:flex print:hidden">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+              <p className="truncate text-sm font-medium text-muted-foreground">{propertyName}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 text-muted-foreground hover:text-foreground"
+                onClick={() => setPaletteOpen(true)}
+              >
+                <Search className="size-4" />
+                <span>Search</span>
+                <kbd
+                  suppressHydrationWarning
+                  className="pointer-events-none rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium"
+                >
+                  {isMac ? "⌘K" : "Ctrl K"}
+                </kbd>
+              </Button>
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={sortAndFix} disabled={fixing}>
                 <Wrench className={cn("size-4", fixing && "animate-pulse")} />
                 {fixing ? "Fixing…" : "Sort & Fix"}
@@ -276,6 +313,7 @@ export function AppShell({ me, reloadMe }: { me: MeResponse; reloadMe: () => voi
           <SheetContent side="bottom" className="max-h-[75vh] overflow-y-auto thin-scroll rounded-t-2xl px-4 pb-6 pt-2">
             <SheetHeader className="px-0 pb-2">
               <SheetTitle className="text-base">More</SheetTitle>
+              <SheetDescription className="sr-only">Additional navigation and actions</SheetDescription>
             </SheetHeader>
             <div className="grid grid-cols-2 gap-2">
               {NAV.filter((n) => !MOBILE_PRIMARY.includes(n.key)).map((item) => (
@@ -310,6 +348,22 @@ export function AppShell({ me, reloadMe }: { me: MeResponse; reloadMe: () => voi
           </SheetContent>
         </Sheet>
       </nav>
+
+      {/* ---------- command palette (Ctrl/Cmd+K) ---------- */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        navItems={NAV}
+        onNavigate={navigate}
+        onOpenTenant={goToTenant}
+        onToggleTheme={toggleTheme}
+        onSignOut={logout}
+        onSortFix={sortAndFix}
+        onInsights={() => {
+          setView("dashboard");
+          setInsightsNonce((n) => n + 1);
+        }}
+      />
 
       {/* ---------- footer ---------- */}
       <footer className="mt-auto border-t border-border/60 px-4 py-3 text-center text-xs text-muted-foreground print:hidden">

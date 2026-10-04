@@ -102,7 +102,7 @@ export function RoomsView({
           {floors.map((floor) => (
             <section key={floor} aria-label={`Floor ${floor}`}>
               <SectionLabel className="mb-3">Floor {floor}</SectionLabel>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
                 {rooms.filter((r) => r.floor === floor).map((room) => (
                   <RoomCardView
                     key={room.id}
@@ -184,7 +184,7 @@ function RoomCardView({
 }) {
   return (
     <Card className="rounded-xl border-border/60 shadow-sm transition-shadow hover:shadow-md">
-      <CardContent className="p-4">
+      <CardContent className="p-5">
         <div className="flex items-center gap-2">
           <p className="text-base font-semibold">Room {room.number}</p>
           <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -212,21 +212,22 @@ function RoomCardView({
           </div>
         </div>
         {room.notes && <p className="mt-1 truncate text-xs text-muted-foreground">{room.notes}</p>}
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {room.beds.map((bed) => {
             if (bed.status === "VACANT" || !bed.tenant) {
               return (
                 <button
                   key={bed.id}
                   onClick={() => onVacantClick(bed)}
-                  className="group flex min-h-20 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border p-2 text-center transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/5"
+                  className="group flex min-h-20 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border p-2 text-center transition-colors hover:border-emerald-500/60 hover:bg-emerald-500/5"
                   aria-label={`Bed ${bed.label} is vacant — add tenant`}
                 >
                   <span className="text-xs font-medium text-muted-foreground">Bed {bed.label}</span>
-                  <span className="hidden text-[11px] text-emerald-600 opacity-0 transition-opacity group-hover:opacity-100 sm:block dark:text-emerald-400">
-                    + Add tenant
+                  <span className="flex items-center gap-1 text-[11px] font-medium">
+                    <Plus className="size-3 shrink-0 text-emerald-600/70 transition-colors group-hover:text-emerald-600 dark:text-emerald-400/70 dark:group-hover:text-emerald-400" />
+                    <span className="text-muted-foreground/70 group-hover:hidden">Vacant</span>
+                    <span className="hidden text-emerald-600 group-hover:inline dark:text-emerald-400">Add tenant</span>
                   </span>
-                  <Plus className="size-4 text-emerald-600 opacity-60 transition-opacity group-hover:opacity-100 dark:text-emerald-400 sm:hidden" />
                 </button>
               );
             }
@@ -235,6 +236,7 @@ function RoomCardView({
               <button
                 key={bed.id}
                 onClick={() => onOccupiedClick(bed)}
+                title={`${bed.tenant.name} — Bed ${bed.label}`}
                 className={cn(
                   "flex min-h-20 flex-col justify-center rounded-lg border p-2 text-left transition-colors hover:bg-muted/60",
                   onNotice
@@ -243,9 +245,11 @@ function RoomCardView({
                 )}
                 aria-label={`Bed ${bed.label}: ${bed.tenant.name}`}
               >
-                <div className="flex w-full items-center gap-1">
+                <div className="flex w-full items-center gap-1.5">
                   <span className={cn("size-1.5 shrink-0 rounded-full", onNotice ? "bg-amber-500" : "bg-emerald-500")} />
-                  <span className="truncate text-xs font-medium">{bed.tenant.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium" title={bed.tenant.name}>
+                    {bed.tenant.name}
+                  </span>
                 </div>
                 <div className="mt-0.5 flex w-full items-center justify-between gap-1">
                   <span className="text-[11px] text-muted-foreground">Bed {bed.label}</span>

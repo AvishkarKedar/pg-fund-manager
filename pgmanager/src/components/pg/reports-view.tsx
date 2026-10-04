@@ -98,18 +98,19 @@ export function ReportsView({ refreshSignal }: { refreshSignal: number }) {
             </CardHeader>
             <CardContent className="h-72 px-2 pb-4 pt-2">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={data.yearSeries} margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border" />
+                <ComposedChart data={data.yearSeries} margin={{ top: 12, right: 12, left: 4, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/60" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} stroke="currentColor" className="text-muted-foreground" />
                   <YAxis
                     tickLine={false} axisLine={false} width={58} tick={{ fontSize: 11 }} stroke="currentColor" className="text-muted-foreground"
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]}
                     tickFormatter={(v: number) => (v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
                   />
                   <Tooltip
                     formatter={(value: number | string, name: string) => [fmtINR(Number(value)), name]}
                     contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", background: "var(--popover)", color: "var(--popover-foreground)" }}
                   />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12, lineHeight: "16px" }} />
                   <Bar dataKey="collected" name="Collected" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={26} />
                   <Line type="monotone" dataKey="expenses" name="Expenses" stroke="#f43f5e" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="profit" name="Profit" stroke="#0d9488" strokeWidth={2} strokeDasharray="4 4" dot={false} />
@@ -246,7 +247,7 @@ export function ReportsView({ refreshSignal }: { refreshSignal: number }) {
                     </TableHeader>
                     <TableBody>
                       {data.debtors.map((d, i) => (
-                        <TableRow key={`${d.name}-${d.period}-${i}`}>
+                        <TableRow key={`${d.name}-${d.period}-${i}`} className="odd:bg-muted/30 hover:bg-muted/50">
                           <TableCell className="font-medium">{d.name}</TableCell>
                           <TableCell className="text-muted-foreground">{d.room}</TableCell>
                           <TableCell className="text-muted-foreground">{monthLabel(d.period, true)}</TableCell>

@@ -4,7 +4,7 @@ import { readJson, ok, handle } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-const KEYS = ["property", "preferences", "rateCard", "rules"] as const;
+const KEYS = ["property", "preferences", "rateCard", "rules", "expenseBudgets", "reminderTemplate"] as const;
 
 export async function GET() {
   return handle(async () => {

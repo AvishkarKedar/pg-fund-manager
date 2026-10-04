@@ -37,6 +37,38 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       .reduce((s, i) => s + Math.max(0, Number(i.dueAmount) - Number(i.paidAmount)), 0);
     const totalPaid = tenant.payments.reduce((s, p) => s + Number(p.amount), 0);
 
+    // payment reliability for the current tenancy:
+    // a period is on-time when fully paid on or before its due date (dates are
+    // UTC midnights, but compare calendar days so a same-day payment with a
+    // time component still counts). Streak runs backwards from the most
+    // recent period and stops at the first non-on-time one; waived periods
+    // are neutral (neither owed nor settled) and are skipped.
+    const calendarDay = (d: Date) => Math.floor(d.getTime() / 86400000);
+    let streak = 0;
+    let streakBroken = false;
+    let onTimeCount = 0;
+    let totalCount = 0;
+    for (const i of invoices) {
+      if (i.status === "WAIVED") continue;
+      totalCount++;
+      const onTime =
+        i.status === "PAID" &&
+        !!i.paidOn &&
+        !!i.dueDate &&
+        calendarDay(i.paidOn) <= calendarDay(i.dueDate);
+      if (onTime) onTimeCount++;
+      if (!streakBroken) {
+        if (onTime) streak++;
+        else streakBroken = true;
+      }
+    }
+    const reliability = {
+      streak,
+      onTimeCount,
+      totalCount,
+      onTimeRate: totalCount > 0 ? Math.round((onTimeCount / totalCount) * 100) : null,
+    };
+
     return ok({
       tenant: {
         id: tenant.id,
@@ -95,6 +127,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       })),
       outstanding,
       totalPaid,
+      reliability,
     });
   });
 }

@@ -4,7 +4,7 @@ import { ok, handle } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-const SETTING_KEYS = ["property", "preferences", "rateCard", "rules"] as const;
+const SETTING_KEYS = ["property", "preferences", "rateCard", "rules", "expenseBudgets", "reminderTemplate"] as const;
 
 export async function GET() {
   return handle(async () => {

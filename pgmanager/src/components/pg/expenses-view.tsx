@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Download, MoreHorizontal, Pencil, Plus, Trash2, TrendingDown, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { BarChart3, Download, MoreHorizontal, Pencil, Plus, Settings as SettingsIcon, Target, Trash2, TrendingDown, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { api, useApi, useSignalReload } from "@/hooks/pg/useApi";
-import type { ExpenseRow, ExpensesResponse } from "@/lib/client";
+import type { ExpenseRow, ExpensesResponse, SettingsResponse } from "@/lib/client";
 import { fmtDate, fmtINR, monthLabel, todayIsoDate, todayYm } from "@/lib/client";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, KpiCard, Money, PageHeader, SectionLabel } from "@/components/pg/bits";
@@ -46,6 +46,27 @@ export function ExpensesView({ refreshSignal }: { refreshSignal: number }) {
   if (category !== "ALL") params.set("category", category);
   const { data, error, loading, reload } = useApi<ExpensesResponse>(`/api/expenses?${params.toString()}`);
   useSignalReload(refreshSignal, reload);
+
+  // budgets live behind /api/settings (fetched here — the view has no settings prop)
+  const { data: settingsData } = useApi<SettingsResponse>("/api/settings");
+  // with a category filter active the main response is filtered, so pull an
+  // unfiltered copy just for the budgets card
+  const unfiltered = useApi<ExpensesResponse>(category === "ALL" ? null : `/api/expenses?month=${month}`);
+  const budgetSource = category === "ALL" ? data : unfiltered.data;
+  const budgets = settingsData?.settings?.expenseBudgets ?? null;
+
+  const budgetRows = useMemo(() => {
+    if (!budgets || !budgetSource) return null;
+    const spentBy = new Map<string, number>();
+    for (const item of budgetSource.summary.byCategory) spentBy.set(item.category, item.amount);
+    return Object.entries(budgets)
+      .map(([cat, cap]) => {
+        const budget = Number(cap) || 0;
+        const spent = spentBy.get(cat) ?? 0;
+        return { category: cat, budget, spent, pct: budget > 0 ? spent / budget : spent > 0 ? Infinity : 0 };
+      })
+      .sort((a, b) => b.pct - a.pct);
+  }, [budgets, budgetSource]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editRow, setEditRow] = useState<ExpenseRow | null>(null);
@@ -125,23 +146,52 @@ export function ExpensesView({ refreshSignal }: { refreshSignal: number }) {
               tone="amber"
             />
             <Card className="rounded-xl border-border/60 shadow-sm">
-              <CardContent className="p-5">
-                <SectionLabel>6-month trend</SectionLabel>
-                <div className="mt-2 h-16">
+              <CardContent className="p-5 md:p-6">
+                <div className="flex items-center justify-between gap-2">
+                  <SectionLabel>6-month trend</SectionLabel>
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                    <BarChart3 className="size-4" />
+                  </div>
+                </div>
+                <div className="mt-2 h-20">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data.trend} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                    <BarChart data={data.trend} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+                      <XAxis
+                        dataKey="label"
+                        tickLine={false}
+                        axisLine={false}
+                        interval={0}
+                        tick={{ fontSize: 10 }}
+                        stroke="currentColor"
+                        className="text-muted-foreground"
+                        tickFormatter={(v: string) => v.split(" ")[0]}
+                      />
                       <Tooltip
                         cursor={{ fill: "var(--muted)" }}
                         formatter={(v: number | string) => [fmtINR(Number(v)), "Expenses"]}
                         contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", background: "var(--popover)", color: "var(--popover-foreground)" }}
                       />
-                      <Bar dataKey="amount" fill="#f43f5e" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="amount" radius={[4, 4, 0, 0]} maxBarSize={20}>
+                        {data.trend.map((t, i) => (
+                          <Cell
+                            key={t.period}
+                            className={cn(
+                              i === data.trend.length - 1
+                                ? "fill-rose-500 dark:fill-rose-400"
+                                : "fill-slate-300 dark:fill-slate-600"
+                            )}
+                          />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* budgets */}
+          <BudgetsCard month={month} rows={budgetRows} loading={!settingsData || !budgetSource} />
 
           {/* list */}
           <Card className="rounded-xl border-border/60 shadow-sm">
@@ -265,6 +315,91 @@ export function ExpensesView({ refreshSignal }: { refreshSignal: number }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/* ---------- budgets (monthly caps set in Settings) ---------- */
+interface BudgetRow {
+  category: string;
+  budget: number;
+  spent: number;
+  pct: number;
+}
+
+function BudgetsCard({ month, rows, loading }: { month: string; rows: BudgetRow[] | null; loading: boolean }) {
+  const totalBudget = rows?.reduce((s, r) => s + r.budget, 0) ?? 0;
+  const totalSpent = rows?.reduce((s, r) => s + r.spent, 0) ?? 0;
+
+  return (
+    <Card className="rounded-xl border-border/60 shadow-sm">
+      <CardContent className="p-5 md:p-6">
+        <div className="flex items-center justify-between gap-2">
+          <SectionLabel>Budgets — {monthLabel(month, true)}</SectionLabel>
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+            <Target className="size-4" />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="mt-4 space-y-2">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : !rows || rows.length === 0 ? (
+          <div className="mt-3 flex items-center gap-2.5 rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+            <SettingsIcon className="size-4 shrink-0" />
+            <span>No budgets set — add them in Settings.</span>
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+              {rows.map((r) => (
+                <BudgetRowView key={r.category} row={r} />
+              ))}
+            </div>
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+              <span className="text-sm text-muted-foreground">Budgeted spend this month</span>
+              <span className="text-sm font-semibold tabular-nums">
+                {fmtINR(totalSpent)} <span className="font-normal text-muted-foreground">of {fmtINR(totalBudget)}</span>
+                {totalSpent > totalBudget && (
+                  <span className="ml-2 text-xs font-semibold text-rose-600 dark:text-rose-400">
+                    Over by {fmtINR(totalSpent - totalBudget)}
+                  </span>
+                )}
+              </span>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BudgetRowView({ row }: { row: BudgetRow }) {
+  const over = row.spent > row.budget;
+  const near = !over && row.pct >= 0.8;
+  const bar = over ? "bg-rose-500" : near ? "bg-amber-500" : "bg-emerald-500";
+  const width = Math.min(100, Math.round(row.pct * 100));
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <span className={cn("size-2.5 shrink-0 rounded-full", CATEGORY_DOTS[row.category] ?? "bg-neutral-400")} />
+          <span className="truncate">{row.category.charAt(0) + row.category.slice(1).toLowerCase()}</span>
+        </span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {fmtINR(row.spent)} / {fmtINR(row.budget)}
+        </span>
+      </div>
+      <div className={cn("mt-1.5 h-2 overflow-hidden rounded-full bg-muted", over && "bg-rose-500/15")}>
+        <div className={cn("h-full rounded-full transition-all", bar)} style={{ width: `${width}%` }} />
+      </div>
+      {over && (
+        <p className="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">
+          Over by {fmtINR(row.spent - row.budget)}
+        </p>
+      )}
     </div>
   );
 }

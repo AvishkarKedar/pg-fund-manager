@@ -3,26 +3,35 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download,
+  ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Download, FileText,
   History, MessageCircle, Phone, ReceiptIndianRupee, Undo2, Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { api, useApi, useSignalReload } from "@/hooks/pg/useApi";
-import type { RentResponse, RentRow, TenantDetail } from "@/lib/client";
-import { fmtDate, fmtINR, RENT_REMINDER, telLink, todayYm, waLink } from "@/lib/client";
+import type { PropertySettings, RentResponse, RentRow, Settings, SettingsResponse, TenantDetail } from "@/lib/client";
+import { fmtDate, fmtINR, monthLabel, renderReminderTemplate, telLink, todayYm, waLink } from "@/lib/client";
 import { roomNaturalKey } from "@/lib/client";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, KpiCard, Money, MonthNav, PageHeader, SectionLabel, StatusBadge } from "@/components/pg/bits";
 import { MarkPaidDialog } from "@/components/pg/mark-paid-dialog";
+import { StatementPrintDialog, type StatementData } from "@/components/pg/statement-print";
 
 type SortKey = "name" | "room" | "rent" | "outstanding" | "status";
+
+/** Compact ₹ axis ticks: 1.2L / 12k / 900 — no trailing .0 */
+const compactAxis = (v: number) =>
+  v >= 100000
+    ? `${(v / 100000).toFixed(1).replace(/\.0$/, "")}L`
+    : v >= 1000
+      ? `${(v / 1000).toFixed(1).replace(/\.0$/, "")}k`
+      : String(v);
 
 export function RentView({ refreshSignal }: { refreshSignal: number }) {
   const [month, setMonth] = useState(todayYm());
@@ -33,6 +42,9 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
   const [markPaid, setMarkPaid] = useState<RentRow | null>(null);
   const [historyRow, setHistoryRow] = useState<RentRow | null>(null);
   const [remindOpen, setRemindOpen] = useState(false);
+  const [statementOpen, setStatementOpen] = useState(false);
+  // property profile for the statement header + reminder template for WhatsApp links
+  const { data: settingsData } = useApi<SettingsResponse>("/api/settings");
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -54,7 +66,9 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
         default: {
           const ka = roomNaturalKey(a.room);
           const kb = roomNaturalKey(b.room);
-          if (ka[0] !== kb[0]) return Number(ka[0] - kb[0]) * dir;
+          const na = Number(ka[0]);
+          const nb = Number(kb[0]);
+          if (na !== nb) return (na - nb) * dir;
           const c = String(ka[1]).localeCompare(String(kb[1]));
           if (c !== 0) return c * dir;
           return a.bed.localeCompare(b.bed) * dir;
@@ -70,6 +84,26 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
 
   const unpaid = rows.filter((r) => r.outstanding > 0);
 
+  // statement payload from the currently loaded (and sorted) roll
+  const statement = useMemo<StatementData | null>(() => {
+    if (!data || data.rows.length === 0) return null;
+    return {
+      month: data.month,
+      property: settingsData?.settings?.property ?? null,
+      rows: rows.map((r) => ({
+        room: r.room,
+        bed: r.bed,
+        name: r.name,
+        dueDate: r.dueDate,
+        due: r.due,
+        paid: r.paid,
+        outstanding: r.outstanding,
+        method: r.method,
+        paidOn: r.paidOn,
+      })),
+    };
+  }, [data, rows, settingsData]);
+
   return (
     <div>
       <PageHeader
@@ -82,23 +116,44 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
               <Download className="size-4" /> Export CSV
             </Button>
             <Button
+              variant="outline"
               size="sm"
-              className="h-9 gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+              className="h-9 gap-1.5"
               disabled={unpaid.length === 0}
               onClick={() => setRemindOpen(true)}
             >
-              <MessageCircle className="size-4" /> Remind unpaid ({unpaid.length})
+              <MessageCircle className="size-4 text-emerald-600 dark:text-emerald-400" /> Remind unpaid
+              <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500/15 px-1.5 text-xs font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {unpaid.length}
+              </span>
             </Button>
+            <UiTooltip>
+              <TooltipTrigger asChild>
+                {/* span wrapper keeps the tooltip reachable while the button is disabled */}
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1.5"
+                    disabled={!statement}
+                    onClick={() => setStatementOpen(true)}
+                  >
+                    <FileText className="size-4" /> Statement
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{statement ? "Print this month's statement" : "Nothing to show"}</TooltipContent>
+            </UiTooltip>
           </>
         }
       />
 
       {loading && !data ? (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-3 [&>*]:min-w-0">
             {Array.from({ length: 3 }).map((_, i) => (
-              <Card key={i} className="rounded-xl"><CardContent className="p-5">
-                <Skeleton className="h-4 w-24" /><Skeleton className="mt-3 h-8 w-32" /><Skeleton className="mt-3 h-1.5 w-full" />
+              <Card key={i} className="rounded-xl"><CardContent className="p-5 md:p-6">
+                <Skeleton className="h-4 w-24" /><Skeleton className="mt-3 h-8 w-32" /><Skeleton className="mt-3 h-2 w-full" />
               </CardContent></Card>
             ))}
           </div>
@@ -109,19 +164,17 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
       ) : data ? (
         <div className="space-y-6">
           {/* summary */}
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-3 [&>*]:min-w-0">
             <KpiCard icon={ReceiptIndianRupee} label="Expected" value={fmtINR(data.totals.expected)} sub={`${data.totals.activeTenancies} invoices this month`} tone="neutral" />
             <KpiCard
               icon={History}
               label="Collected"
               value={fmtINR(data.totals.collected)}
-              sub={
-                <div className="space-y-1.5">
-                  <span>{Math.round(data.totals.expected > 0 ? (data.totals.collected / data.totals.expected) * 100 : 0)}% of expected</span>
-                  <Progress value={data.totals.expected > 0 ? (data.totals.collected / data.totals.expected) * 100 : 0} className="h-1.5 [&>div]:bg-emerald-500" />
-                </div>
-              }
+              sub={`${data.totals.counts.PAID ?? 0} of ${data.totals.activeTenancies} invoices settled`}
               tone="emerald"
+              progress={data.totals.expected > 0 ? (data.totals.collected / data.totals.expected) * 100 : 0}
+              progressLabel="Collection rate"
+              progressValue={`${data.totals.expected > 0 ? Math.round((data.totals.collected / data.totals.expected) * 100) : 0}%`}
             />
             <KpiCard
               icon={Users}
@@ -138,31 +191,44 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
                   )}
                 </span>
               }
-              tone="amber"
+              tone={data.totals.pending > 0 ? "amber" : "emerald"}
             />
           </div>
 
           {/* 6 month mini chart */}
           <Card className="rounded-xl border-border/60 shadow-sm">
-            <CardContent className="h-44 px-2 py-4">
-              <SectionLabel className="mb-2 px-4">Collected vs expected — last 6 months</SectionLabel>
-              <ResponsiveContainer width="100%" height="85%">
-                <BarChart data={data.history} margin={{ top: 4, right: 12, left: 4, bottom: 0 }} barGap={2}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} stroke="currentColor" className="text-muted-foreground" />
-                  <YAxis
-                    tickLine={false} axisLine={false} width={54} tick={{ fontSize: 11 }} stroke="currentColor" className="text-muted-foreground"
-                    tickFormatter={(v: number) => (v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "var(--muted)" }}
-                    formatter={(value: number | string, name: string) => [fmtINR(Number(value)), name === "collected" ? "Collected" : "Expected"]}
-                    contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", background: "var(--popover)", color: "var(--popover-foreground)" }}
-                  />
-                  <Bar dataKey="collected" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="expected" fill="currentColor" className="text-muted-foreground/30" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <CardContent className="px-2 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4">
+                <SectionLabel>Collected vs expected — last 6 months</SectionLabel>
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2.5 rounded-sm bg-emerald-500" aria-hidden /> Collected
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2.5 rounded-sm bg-slate-400/60 dark:bg-slate-500/60" aria-hidden /> Expected
+                  </span>
+                </div>
+              </div>
+              <div className="mt-2 h-36">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data.history} margin={{ top: 4, right: 12, left: 4, bottom: 0 }} barGap={2}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-slate-200 dark:text-slate-800" />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} stroke="currentColor" className="text-muted-foreground" />
+                    <YAxis
+                      tickLine={false} axisLine={false} width={44} tick={{ fontSize: 11 }} stroke="currentColor" className="text-muted-foreground"
+                      allowDecimals={false}
+                      tickFormatter={compactAxis}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "var(--muted)" }}
+                      formatter={(value: number | string, name: string) => [fmtINR(Number(value)), name === "collected" ? "Collected" : "Expected"]}
+                      contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", background: "var(--popover)", color: "var(--popover-foreground)" }}
+                    />
+                    <Bar dataKey="collected" fill="#10b981" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expected" fill="currentColor" className="text-muted-foreground/30" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </CardContent>
           </Card>
 
@@ -221,8 +287,15 @@ export function RentView({ refreshSignal }: { refreshSignal: number }) {
         }
         onDone={reload}
       />
-      <InvoiceHistoryDialog open={!!historyRow} onClose={() => setHistoryRow(null)} row={historyRow} onReversed={reload} />
-      <RemindDialog open={remindOpen} onClose={() => setRemindOpen(false)} rows={unpaid} month={month} />
+      <InvoiceHistoryDialog open={!!historyRow} onClose={() => setHistoryRow(null)} row={historyRow} month={month} onReversed={reload} />
+      <RemindDialog
+        open={remindOpen}
+        onClose={() => setRemindOpen(false)}
+        rows={unpaid}
+        month={month}
+        settings={settingsData?.settings ?? null}
+      />
+      <StatementPrintDialog open={statementOpen} onClose={() => setStatementOpen(false)} data={statement} />
     </div>
   );
 }
@@ -271,7 +344,7 @@ function RentRowView({
   return (
     <>
       <TableRow
-        className="cursor-pointer odd:bg-muted/30 hover:odd:bg-muted/50"
+        className="cursor-pointer odd:bg-muted/30 hover:bg-muted/50 hover:odd:bg-muted/50 [&_td]:py-3"
         onClick={onToggle}
       >
         <TableCell className="w-8">
@@ -295,7 +368,11 @@ function RentRowView({
         <TableCell className="text-right"><Money value={row.due} /></TableCell>
         <TableCell className="text-right"><Money value={row.paid} /></TableCell>
         <TableCell className="text-right">
-          <Money value={row.outstanding} className={overdue ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"} />
+          <Money
+            value={row.outstanding}
+            muted={!overdue}
+            className={overdue ? "text-rose-600 dark:text-rose-400" : undefined}
+          />
         </TableCell>
         <TableCell><StatusBadge status={row.invoiceStatus} /></TableCell>
         <TableCell className="max-w-40 truncate text-xs text-muted-foreground">
@@ -349,11 +426,13 @@ function InvoiceHistoryDialog({
   open,
   onClose,
   row,
+  month,
   onReversed,
 }: {
   open: boolean;
   onClose: () => void;
   row: RentRow | null;
+  month: string;
   onReversed: () => void;
 }) {
   const detail = useApi<TenantDetail>(open && row ? `/api/tenants/${row.tenantId}` : null);
@@ -361,7 +440,7 @@ function InvoiceHistoryDialog({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const payments = detail.data?.payments ?? [];
-  const periodPayments = payments.filter((p) => p.date.slice(0, 7) === row?.period);
+  const periodPayments = payments.filter((p) => p.date.slice(0, 7) === month);
   const list = showAll ? payments : periodPayments;
 
   async function reverse(paymentId: string) {
@@ -414,9 +493,9 @@ function InvoiceHistoryDialog({
                   </p>
                 </div>
                 {p.reversedAt ? (
-                  <StatusBadge status="CHECKED_OUT" className="border-rose-500/25 bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
                     Reversed
-                  </StatusBadge>
+                  </span>
                 ) : (
                   <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" disabled={busyId === p.id} onClick={() => reverse(p.id)}>
                     <Undo2 className="size-3.5" /> Reverse
@@ -441,12 +520,32 @@ function RemindDialog({
   onClose,
   rows,
   month,
+  settings,
 }: {
   open: boolean;
   onClose: () => void;
   rows: RentRow[];
   month: string;
+  settings: Settings | null;
 }) {
+  const property: PropertySettings | null | undefined = settings?.property ?? undefined;
+
+  /** WhatsApp message from the Settings reminder template (falls back to the built-in default). */
+  function reminderMessage(r: RentRow): string {
+    return renderReminderTemplate(settings?.reminderTemplate, {
+      name: r.name,
+      first_name: r.name.split(" ")[0],
+      property: property?.name ?? "",
+      room: r.room,
+      bed: r.bed,
+      month: monthLabel(month, true),
+      amount: fmtINR(r.outstanding),
+      due_day: String(r.dueDay),
+      phone: r.phone ?? "",
+      upi: property?.upiId ?? "",
+    });
+  }
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -456,8 +555,8 @@ function RemindDialog({
             Remind unpaid tenants
           </DialogTitle>
           <DialogDescription>
-            {rows.length} tenant{rows.length === 1 ? "" : "s"} with outstanding rent for {month}. Tap WhatsApp to send a ready-made reminder —
-            nothing is sent automatically.
+            {rows.length} tenant{rows.length === 1 ? "" : "s"} with outstanding rent for {monthLabel(month)}. Tap WhatsApp to send a
+            ready-made reminder from your template — nothing is sent automatically.
           </DialogDescription>
         </DialogHeader>
         <div className="thin-scroll max-h-96 space-y-1.5 overflow-y-auto pr-1">
@@ -472,10 +571,11 @@ function RemindDialog({
               <StatusBadge status={r.invoiceStatus} />
               {r.phone && (
                 <a
-                  href={waLink(r.phone, RENT_REMINDER(r.name, r.outstanding, month))}
+                  href={waLink(r.phone, reminderMessage(r))}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex size-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+                  title={reminderMessage(r)}
+                  className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
                   aria-label={`WhatsApp ${r.name}`}
                 >
                   <MessageCircle className="size-4" />

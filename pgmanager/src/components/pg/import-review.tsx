@@ -263,7 +263,7 @@ export function ImportReview({
               </TableHeader>
               <TableBody>
                 {parse.preview.slice(0, 12).map((r) => (
-                  <TableRow key={r.index}>
+                  <TableRow key={r.index} className="odd:bg-muted/30 hover:bg-muted/50">
                     <TableCell>
                       {r.warnings.length > 0 && (
                         <TooltipProvider>

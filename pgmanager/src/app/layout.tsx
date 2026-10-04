@@ -16,9 +16,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PG Fund Manager — Property finance & management",
   description:
-    "Professional PG / hostel finance manager: rooms, tenants, rent collection, expenses, Excel import and reports.",
-  icons: { icon: "/logo.svg" },
+    "Professional PG property finance: rent tracking, payments, expenses, tenant management and Excel import for Indian property owners.",
+  keywords: ["PG", "paying guest", "rent", "property management", "India", "hostel"],
 };
+
+const themeScript = `(function(){try{var t=localStorage.getItem("pg-theme");if(t==="dark"){document.documentElement.classList.add("dark")}}catch(e){}})()`;
 
 export default function RootLayout({
   children,
@@ -27,6 +29,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

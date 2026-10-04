@@ -42,10 +42,19 @@ export interface Settings {
   preferences?: Preferences | null;
   rateCard?: RateCardItem[] | null;
   rules?: HouseRules | null;
+  /** Monthly spend caps per expense category, e.g. { FOOD: 40000 } */
+  expenseBudgets?: Record<string, number> | null;
+  /** Custom WhatsApp rent-reminder message template. */
+  reminderTemplate?: string | null;
 }
 
 export interface MeResponse {
   user: User | null;
+  settings: Settings;
+}
+
+/** GET /api/settings — the full (whitelisted) settings map. */
+export interface SettingsResponse {
   settings: Settings;
 }
 
@@ -228,6 +237,13 @@ export interface TenantDetail {
   }[];
   outstanding: number;
   totalPaid: number;
+  /** Payment reliability for the current tenancy (on-time = PAID by the due date). */
+  reliability: {
+    streak: number;
+    onTimeCount: number;
+    totalCount: number;
+    onTimeRate: number | null;
+  };
 }
 
 // ---------- rent ----------
@@ -530,6 +546,21 @@ export function waLink(phone: string | null | undefined, message: string): strin
 
 export function telLink(phone: string | null | undefined): string {
   return `tel:${(phone ?? "").replace(/[^\d+]/g, "")}`;
+}
+
+export const DEFAULT_REMINDER_TEMPLATE =
+  "Hi {name}! Gentle reminder — rent of {amount} for {month} (Room {room}-{bed}) at {property} is pending. Kindly pay at the earliest. Thank you!";
+
+/** Replace {placeholders} in a reminder template; unknown vars become empty. */
+export function renderReminderTemplate(
+  template: string | null | undefined,
+  vars: Record<string, string | number | null | undefined>
+): string {
+  const tpl = template?.trim() ? template : DEFAULT_REMINDER_TEMPLATE;
+  return tpl.replace(/\{(\w+)\}/g, (whole, key: string) => {
+    const v = vars[key];
+    return v === null || v === undefined || v === "" ? "" : String(v);
+  });
 }
 
 export const RENT_REMINDER = (name: string, amount: number, month: string) =>

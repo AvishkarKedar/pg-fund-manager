@@ -26,6 +26,12 @@ import { TenantDetailSheet } from "@/components/pg/tenant-detail";
 
 type ActionMode = "checkout" | "backfill";
 
+const ordSuffix = (n: number) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return s[(v - 20) % 10] ?? s[v] ?? s[0];
+};
+
 export function TenantsView({
   refreshSignal,
   focusTenantId,
@@ -166,7 +172,7 @@ export function TenantsView({
                     <TableHead>Room</TableHead>
                     <TableHead className="text-right">Rent</TableHead>
                     <TableHead className="text-right">Deposit</TableHead>
-                    <TableHead className="text-center">Due day</TableHead>
+                    <TableHead className="text-center">Rent due on</TableHead>
                     <TableHead>This month</TableHead>
                     <TableHead>Joined</TableHead>
                     <TableHead className="w-10" />
@@ -174,17 +180,23 @@ export function TenantsView({
                 </TableHeader>
                 <TableBody>
                   {tenants.map((t) => (
-                    <TableRow key={t.id} className="cursor-pointer odd:bg-muted/30 hover:odd:bg-muted/50" onClick={() => setSheetTenantId(t.id)}>
+                    <TableRow
+                      key={t.id}
+                      className="cursor-pointer odd:bg-muted/30 hover:bg-muted/50 hover:odd:bg-muted/50 [&_td]:py-3.5"
+                      onClick={() => setSheetTenantId(t.id)}
+                    >
                       <TableCell>
-                        <div className="flex items-center gap-2.5">
-                          <Avatar className="size-8">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="size-9">
                             <AvatarFallback className="bg-emerald-500/15 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                               {initials(t.name)}
                             </AvatarFallback>
                           </Avatar>
                           <div className="min-w-0">
-                            <p className="truncate font-medium">{t.name}</p>
-                            <p className="text-xs text-muted-foreground">{t.phone ?? "—"}</p>
+                            <p className="truncate font-medium" title={t.name}>{t.name}</p>
+                            <p className="truncate text-xs tabular-nums text-muted-foreground" title={t.phone ?? undefined}>
+                              {t.phone ?? "—"}
+                            </p>
                           </div>
                         </div>
                       </TableCell>
@@ -192,12 +204,14 @@ export function TenantsView({
                         {t.room ? (
                           <span className="whitespace-nowrap">{t.room}<span className="text-muted-foreground">-{t.bed}</span></span>
                         ) : (
-                          <span className="text-xs italic text-muted-foreground">unassigned</span>
+                          <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                            Unassigned
+                          </span>
                         )}
                       </TableCell>
                       <TableCell className="text-right"><Money value={t.monthlyRent} /></TableCell>
                       <TableCell className="text-right"><Money value={t.deposit} muted /></TableCell>
-                      <TableCell className="text-center tabular-nums text-muted-foreground">{t.dueDay ?? "—"}</TableCell>
+                      <TableCell className="text-center tabular-nums text-muted-foreground">{t.dueDay ? `${t.dueDay}${ordSuffix(t.dueDay)}` : "—"}</TableCell>
                       <TableCell>
                         {t.current ? (
                           <div className="flex items-center gap-2">
@@ -237,7 +251,7 @@ export function TenantsView({
           <div className="space-y-2.5 md:hidden">
             {tenants.map((t) => (
               <Card key={t.id} className="rounded-xl border-border/60 shadow-sm">
-                <CardContent className="p-4">
+                <CardContent className="p-5">
                   <div className="flex items-start gap-3">
                     <Avatar className="size-9">
                       <AvatarFallback className="bg-emerald-500/15 text-xs font-semibold text-emerald-700 dark:text-emerald-400">

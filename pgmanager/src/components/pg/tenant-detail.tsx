@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import {
-  ArrowRightLeft, BellOff, BellRing, CalendarCheck, MoreHorizontal, MessageCircle,
+  ArrowRightLeft, BellOff, BellRing, CalendarCheck, Flame, MoreHorizontal, MessageCircle,
   Phone, Pencil, Printer, ReceiptIndianRupee, Upload, UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -95,8 +95,10 @@ export function TenantDetailSheet({
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent side="right" className="thin-scroll w-full overflow-y-auto p-0 sm:max-w-xl">
         <SheetHeader className="border-b border-border/60 px-5 py-4">
+          <SheetDescription className="sr-only">Tenant profile, rent ledger and payment history</SheetDescription>
           {loading || !data ? (
             <div className="space-y-2">
+              <SheetTitle className="sr-only">Loading tenant</SheetTitle>
               <Skeleton className="h-6 w-40" />
               <Skeleton className="h-4 w-56" />
             </div>
@@ -193,6 +195,28 @@ export function TenantDetailSheet({
                 </div>
               ))}
             </div>
+
+            {/* payment reliability — hidden while there are no invoices */}
+            {data.reliability && data.reliability.totalCount > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+                    data.reliability.streak >= 3
+                      ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : "border-border/60 bg-muted/40 text-muted-foreground"
+                  )}
+                >
+                  <Flame className="size-3.5" />
+                  {data.reliability.streak}-month on-time streak
+                </span>
+                {data.reliability.onTimeRate !== null && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                    On-time {data.reliability.onTimeRate}%
+                  </span>
+                )}
+              </div>
+            )}
 
             <Tabs defaultValue="profile">
               <TabsList className="w-full">

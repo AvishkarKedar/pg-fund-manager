@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { fmtINR, monthLabel } from "@/lib/client";
 const STATUS_STYLES: Record<string, string> = {
   PAID: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/25",
   PARTIAL: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/25",
-  DUE: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/25",
+  DUE: "border-amber-300/60 bg-amber-100 text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/20 dark:text-amber-300",
   OVERDUE: "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/25",
   WAIVED: "bg-slate-500/10 text-slate-500 dark:text-slate-500 border-slate-400/25",
   VACANT: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/25",
@@ -152,15 +153,52 @@ export function LoadingGrid({ count = 4, className }: { count?: number; classNam
     <div className={cn("grid gap-4 sm:grid-cols-2 xl:grid-cols-4", className)}>
       {Array.from({ length: count }).map((_, i) => (
         <Card key={i} className="rounded-xl">
-          <CardContent className="p-6">
+          <CardContent className="p-5 md:p-6">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="mt-3 h-8 w-32" />
-            <Skeleton className="mt-3 h-1.5 w-full" />
+            <Skeleton className="mt-3 h-2 w-full" />
           </CardContent>
         </Card>
       ))}
     </div>
   );
+}
+
+// ---------- count-up ----------
+// useLayoutEffect on the client (jump to the animation start BEFORE first paint,
+// so the final value never flashes); plain useEffect while SSR'd (no-op there).
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/**
+ * rAF-based count-up from ~85% of target (not 0 — avoids a jarring start).
+ * Ease-out cubic, integer steps, ~700ms. Skips animation entirely when the user
+ * prefers reduced motion. When `target` changes the count re-runs from 85% of it.
+ */
+export function useCountUp(target: number, durationMs = 700): number {
+  const [value, setValue] = useState(target);
+  useIsoLayoutEffect(() => {
+    if (!Number.isFinite(target) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setValue(target);
+      return;
+    }
+    const start = Math.round(target * 0.85);
+    if (start === target) {
+      setValue(target);
+      return;
+    }
+    setValue(start);
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (now: number): void => {
+      const p = Math.min(1, (now - t0) / durationMs);
+      const eased = 1 - (1 - p) ** 3; // ease-out cubic
+      setValue(Math.round(start + (target - start) * eased));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, durationMs]);
+  return value;
 }
 
 // ---------- KPI card ----------
@@ -171,6 +209,9 @@ export function KpiCard({
   sub,
   tone = "neutral",
   progress,
+  progressLabel,
+  progressValue,
+  countUp,
   className,
 }: {
   icon: LucideIcon;
@@ -178,23 +219,47 @@ export function KpiCard({
   value: React.ReactNode;
   sub?: React.ReactNode;
   tone?: "emerald" | "amber" | "rose" | "neutral";
+  /** 0–100. When set, renders the standard label row + full-width h-2 bar. */
   progress?: number;
+  /** Left text of the bar's label row (defaults to the card label). */
+  progressLabel?: string;
+  /** Right text of the bar's label row (defaults to `${progress}%`). */
+  progressValue?: string;
+  /**
+   * Animate the big value: counts up from ~85% of `target` (rAF, respects
+   * prefers-reduced-motion). The raw animated integer is passed to `format`
+   * on every frame (defaults to fmtINR); `value` remains the fallback when omitted.
+   */
+  countUp?: { target: number; format?: (n: number) => React.ReactNode };
   className?: string;
 }) {
   const tones = {
     emerald: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-    amber: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    amber: "bg-amber-500/10 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",
     rose: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
     neutral: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
   } as const;
   const bars = {
-    emerald: "bg-emerald-500",
-    amber: "bg-amber-500",
-    rose: "bg-rose-500",
-    neutral: "bg-slate-400",
+    // dark variants brightened one step so bars pop against the muted track
+    emerald: "bg-emerald-500 dark:bg-emerald-400",
+    amber: "bg-amber-500 dark:bg-amber-400",
+    rose: "bg-rose-500 dark:bg-rose-400",
+    neutral: "bg-slate-400 dark:bg-slate-300",
   } as const;
+  const pct = progress !== undefined ? Math.min(100, Math.max(0, progress)) : null;
+  const animated = useCountUp(countUp?.target ?? 0);
+  const display = countUp
+    ? countUp.format
+      ? countUp.format(animated)
+      : fmtINR(animated)
+    : value;
   return (
-    <Card className={cn("rounded-xl border-border/60 shadow-sm transition-shadow hover:shadow-md", className)}>
+    <Card
+      className={cn(
+        "rounded-xl border-border/60 shadow-sm transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-md",
+        className
+      )}
+    >
       <CardContent className="p-5 md:p-6">
         <div className="flex items-center justify-between gap-2">
           <SectionLabel>{label}</SectionLabel>
@@ -202,14 +267,20 @@ export function KpiCard({
             <Icon className="size-4" />
           </div>
         </div>
-        <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums md:text-[1.75rem]">{value}</div>
+        <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums md:text-[1.75rem]">{display}</div>
         {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
-        {progress !== undefined && (
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn("h-full rounded-full transition-all", bars[tone])}
-              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-            />
+        {pct !== null && (
+          <div className="mt-3">
+            <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+              <span className="truncate text-muted-foreground">{progressLabel ?? label}</span>
+              <span className="shrink-0 font-medium tabular-nums">{progressValue ?? `${Math.round(pct)}%`}</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn("h-full rounded-full transition-all", bars[tone])}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
           </div>
         )}
       </CardContent>

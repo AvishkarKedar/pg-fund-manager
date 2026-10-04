@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  Banknote, Check, ChevronsUpDown, CreditCard, Download, FileText, FilterX,
+  Banknote, CalendarDays, Check, ChevronsUpDown, CreditCard, Download, FileText, FilterX,
   Landmark, Plus, Printer, ReceiptText, Search, Smartphone, Undo2, Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
 import { api, useApi, useDebounced, useSignalReload } from "@/hooks/pg/useApi";
@@ -102,9 +103,8 @@ export function PaymentsView({ refreshSignal, property }: { refreshSignal: numbe
               {METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Input type="date" className="h-10 w-full sm:w-38" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} aria-label="From date" />
-          <span className="hidden text-xs text-muted-foreground sm:block">to</span>
-          <Input type="date" className="h-10 w-full sm:w-38" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} aria-label="To date" />
+          <DateFilterInput id="pay-from" label="From date" value={from} onChange={(v) => { setFrom(v); setPage(1); }} />
+          <DateFilterInput id="pay-to" label="To date" value={to} onChange={(v) => { setTo(v); setPage(1); }} />
           {hasFilters && (
             <Button
               variant="ghost"
@@ -157,7 +157,7 @@ export function PaymentsView({ refreshSignal, property }: { refreshSignal: numbe
                 {data.payments.map((p) => {
                   const Icon = METHOD_ICONS[p.method] ?? Wallet;
                   return (
-                    <TableRow key={p.id} className={cn("odd:bg-muted/30 hover:odd:bg-muted/50", p.reversedAt && "opacity-60")}>
+                    <TableRow key={p.id} className={cn("odd:bg-muted/30 hover:bg-muted/50 hover:odd:bg-muted/50 [&_td]:py-3", p.reversedAt && "opacity-60")}>
                       <TableCell className="font-mono text-xs">{p.receiptNumber}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{fmtDate(p.date)}</TableCell>
                       <TableCell className={cn("font-medium", p.reversedAt && "line-through")}>{p.tenantName}</TableCell>
@@ -199,14 +199,21 @@ export function PaymentsView({ refreshSignal, property }: { refreshSignal: numbe
                               >
                                 <Printer className="size-3.5" /> Receipt
                               </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 gap-1 text-xs text-rose-600 hover:bg-rose-500/10 dark:text-rose-400"
-                                onClick={() => setReverseTarget(p)}
-                              >
-                                <Undo2 className="size-3.5" /> Reverse
-                              </Button>
+                              <span className="h-4 w-px shrink-0 bg-border" aria-hidden />
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-8 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
+                                    aria-label={`Reverse payment ${p.receiptNumber}`}
+                                    onClick={() => setReverseTarget(p)}
+                                  >
+                                    <Undo2 className="size-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Reverse payment</TooltipContent>
+                              </Tooltip>
                             </>
                           )}
                         </div>
@@ -272,6 +279,43 @@ export function PaymentsView({ refreshSignal, property }: { refreshSignal: numbe
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/* ---------------- date range filter ---------------- */
+/** Native date input (kept for picker/keyboard support) wearing a DD MMM YYYY display mask. */
+function DateFilterInput({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Label htmlFor={id} className="shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground">
+        {label}
+      </Label>
+      <div className="relative h-10 w-full sm:w-36">
+        <Input
+          id={id}
+          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="peer absolute inset-0 z-10 h-10 w-full cursor-pointer opacity-0"
+        />
+        <div className="pointer-events-none absolute inset-0 flex h-10 items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none peer-focus-visible:border-ring peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/40">
+          <span className={value ? "tabular-nums" : "text-muted-foreground/70"}>
+            {value ? fmtDate(value) : "DD MMM YYYY"}
+          </span>
+          <CalendarDays className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </div>
+      </div>
     </div>
   );
 }
