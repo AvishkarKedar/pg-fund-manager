@@ -229,7 +229,7 @@ export default function RentPage() {
             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
             <YAxis tick={{ fontSize: 10 }} width={60} tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
             <Tooltip
-              formatter={(value: number) => fmt(value)}
+              formatter={(value) => fmt(Number(value ?? 0))}
               contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }}
             />
             <Bar dataKey="expected" name="Expected" fill="hsl(var(--muted))" radius={[4, 4, 0, 0]} />

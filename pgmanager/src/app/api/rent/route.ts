@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
         ...(startDateFilter ? { joiningDate: startDateFilter } : {}),
       },
       include: {
-        tenant: true,
+        tenant: { include: { assignments: { include: { rentRecords: true } } } },
         bed: { include: { room: true } },
         rentRecords: { where: { month } },
       },
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
         joiningDate: a.joiningDate,
         paid,
         remaining,
-        status: isOverdue && status !== "PAID" ? "OVERDUE" : status,
+        status: isOverdue ? "OVERDUE" : status,
         rentRecordId: rr?.id || null,
         paidMonths: a.tenant.assignments?.[0]?.rentRecords?.length || 0,
       };

@@ -1,7 +1,7 @@
 // PG Manager — Database Seed Script
 // Run: npx ts-node --compiler-options '{"module":"CommonJS"}' prisma/seed.ts
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, ExpenseCategory } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -139,6 +139,7 @@ async function main() {
       await prisma.expense.create({
         data: {
           ...e,
+          category: e.category as ExpenseCategory,
           date: new Date(),
           amount: e.amount,
           createdBy: admin.id,

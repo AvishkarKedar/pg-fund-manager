@@ -3,11 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 
 // GET /api/rooms/[id]
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     await requireAuth();
     const room = await prisma.room.findUnique({
-      where: { id: params.id },
+      where: { id: id },
       include: {
         beds: {
           include: {
@@ -27,13 +28,14 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 }
 
 // PUT /api/rooms/[id]
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const user = await requireAuth();
     const body = await request.json();
 
     const room = await prisma.room.update({
-      where: { id: params.id },
+      where: { id: id },
       data: {
         number: body.number || undefined,
         floor: body.floor !== undefined ? parseInt(body.floor) : undefined,
@@ -46,7 +48,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         userId: user.id,
         action: "UPDATE",
         entity: "room",
-        entityId: params.id,
+        entityId: id,
         newValue: JSON.stringify({ number: room.number }),
       },
     });
@@ -58,13 +60,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 // DELETE /api/rooms/[id]
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const user = await requireAuth();
 
     // Check for active tenants
     const activeBeds = await prisma.tenantAssignment.count({
-      where: { bed: { roomId: params.id }, isActive: true },
+      where: { bed: { roomId: id }, isActive: true },
     });
     if (activeBeds > 0) {
       return NextResponse.json(
@@ -73,14 +76,14 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
       );
     }
 
-    await prisma.room.delete({ where: { id: params.id } });
+    await prisma.room.delete({ where: { id: id } });
 
     await prisma.auditLog.create({
       data: {
         userId: user.id,
         action: "DELETE",
         entity: "room",
-        entityId: params.id,
+        entityId: id,
       },
     });
 

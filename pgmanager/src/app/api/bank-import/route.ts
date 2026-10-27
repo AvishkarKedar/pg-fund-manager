@@ -44,7 +44,13 @@ export async function POST(request: NextRequest) {
     const dataRows = rows.slice(1).filter((r: string[]) => r.some((c) => c.trim()));
 
     // Parse and structure transactions
-    const transactions = dataRows.map((row: string[], idx: number) => {
+    interface ParsedTxn {
+      slNo: number; valueDate: string; originalDescription: string; parsedName: string | null;
+      amount: number; type: string; balance: number | null; reference: string | null;
+      suggestedTenantId?: string; suggestedTenantName?: string; suggestedBed?: string | null;
+      suggestedMonth?: string; confidence?: number; status?: string; isDuplicate?: boolean;
+    }
+    const transactions: ParsedTxn[] = dataRows.map((row: string[], idx: number) => {
       const rawDesc = row[descIdx]?.trim() || "";
       const parsedName = parseUPIName(rawDesc);
       const amount = parseAmount(row, creditIdx, debitIdx);

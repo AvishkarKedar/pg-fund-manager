@@ -4,10 +4,10 @@ import { requireAuth } from "@/lib/auth";
 import { getCurrentMonth } from "@/lib/utils";
 
 // GET /api/tenants/[id]
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     await requireAuth();
-    const { id } = params;
 
     const [tenant, auditLogs] = await Promise.all([
       prisma.tenant.findUnique({
@@ -80,10 +80,10 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 }
 
 // PUT /api/tenants/[id]
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const user = await requireAuth();
-    const { id } = params;
     const body = await request.json();
 
     const tenant = await prisma.tenant.findUnique({ where: { id } });
@@ -121,10 +121,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 // DELETE /api/tenants/[id]
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const user = await requireAuth();
-    const { id } = params;
 
     // Soft delete: mark as CHECKED_OUT, don't remove from DB
     const updated = await prisma.tenant.update({
