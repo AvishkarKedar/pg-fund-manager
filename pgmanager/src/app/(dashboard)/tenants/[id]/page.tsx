@@ -204,7 +204,7 @@ export default function TenantHistoryPage() {
           >
             <tab.icon className="w-4 h-4" />
             {tab.label}
-            {tab.count !== undefined && (
+            {"count" in tab && tab.count !== undefined && (
               <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-muted">{tab.count}</span>
             )}
           </button>
